@@ -10,7 +10,9 @@ On the same phone, an FX-4CR connected over USB using the BG2FX backend (model 2
 
 The owner also reported that Ham2K PoLo on the Pixel successfully connected to the same USB CAT session at `localhost:4532`.
 
-The FX-4CR also passed Bluetooth RFCOMM CAT using model 2053. The CAT frequency followed the owner’s dial change from 7,061,900 to 7,058,700 Hz. A direct rigctld `F` command then tuned to 7,058,800 Hz and a second command restored 7,058,700 Hz. Both returned `RPRT 0`, and each frequency was read back after a delay. PTT was off before and after. PoLo frequency changes remain unverified, and the rig’s hardware revision has yet to be recorded.
+The FX-4CR also passed Bluetooth RFCOMM CAT using model 2053. The CAT frequency followed the owner’s dial change from 7,061,900 to 7,058,700 Hz. A direct rigctld `F` command then tuned to 7,058,800 Hz and a second command restored 7,058,700 Hz. Both returned `RPRT 0`, and each frequency was read back after a delay. PTT was off before and after. The rig’s hardware revision has yet to be recorded.
+
+The owner verified spot tuning in Ham2K Logger Next (HaLo) 26.11.0 over the same Bluetooth CAT session after selecting its rigctld equipment model. A temporary CAT trace showed raw Kenwood commands with the original client profile and valid rigctld replies after the change, including a readback of 14,338,000 Hz in USB mode.
 
 ## Build and test with Docker
 
@@ -36,6 +38,8 @@ rigctl -m 2 -r 127.0.0.1:14532 m
 ```
 
 Check that frequency and mode are returned. Tap **Stop**, check that `rigctl` can no longer connect, then start again and repeat. If reporting an issue, include the phone and Android version, the status text, the command and output, and whether pressing Stop or restarting changes the result. For an Android client, use NET rigctl at `127.0.0.1:4532`.
+
+In **Ham2K Logger Next (HaLo)**, choose **Radio controlled via rigctld** as the equipment model, set the host to `127.0.0.1` and port to `4532`, and pick that entry as the **Main VFO** in Station settings. Choose the physical radio model in Android rigctld. A client configured for Kenwood sends raw commands such as `FA;` and `IF;`, which the rigctld endpoint cannot interpret.
 
 ## Verify CAT with a radio
 
