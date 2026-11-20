@@ -16,6 +16,8 @@ The owner verified spot tuning in Ham2K Logger Next (HaLo) 26.11.0 over the same
 
 The owner reported successful CW decoding in stock GGMorse with the FX-4CR connected over USB to the Pixel 8a, without an audio adapter or an in-app source selector. Android can automatically route capture to a compatible USB audio device. The active recording device was not independently confirmed. [Android USB audio](https://source.android.com/docs/core/audio/usb#host-mode-applications)
 
+On the same USB setup, the owner reported a gray waterfall in Robot36 2.17 (67) with Android rigctld stopped. The symptom persisted after restarting Robot36 and the rig, reconnecting USB, clearing HaLo's USB launch default, and trying 48 kHz, both stereo channels, and Fixed Point. ADB matched Robot36's active, unsilenced recording session to the rig's `USB-Audio - QCC3024` input. To reproduce, keep PTT off and compare Robot36 with a known-working USB audio app using the same received signal, one app at a time. Use `adb shell dumpsys audio` and `adb shell dumpsys media.audio_policy` to confirm each app's route. The captured signal level and cause are still unknown.
+
 ## Build and test with Docker
 
 From a Linux host with Docker access, run these commands from the workspace root. The Android image downloads the pinned SDK, NDK and build tools and accepts Google’s Android SDK licenses inside the image.
