@@ -1,0 +1,9 @@
+# Separate read-only reference checkout.
+/Android-port/
+
+/.gradle/
+/.work/
+/app/build/
+/.cxx/
+/app/.cxx/
+/local.properties
