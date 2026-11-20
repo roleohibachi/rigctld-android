@@ -80,6 +80,8 @@ Acceptance criteria:
 
 ### Phase 2: shared audio
 
+Android rigctld owns the physical CAT and audio routes for each rig profile. Configure a modem client once to use Android rigctld as its CAT and audio source. Switching profiles in Android rigctld may require the client to reconnect or renegotiate the stream. Its configured endpoint and audio source must stay the same.
+
 Reuse Android audio and special rig transport code where practical. Prove reliable device selection (input/output), verified route, capture/playback, gain and diagnostics on real hardware. Handle sample rates and timestamps; account for Android processing and Bluetooth profile limitations. Keep ordinary UI audio separate from RF audio. Define behavior on hot unplug/reconnect, starvation, backgrounding and route changes. Use foreground service as needed. Do not hold microphone unnecessarily during CAT-only operation.
 
 Evaluate Oboe/AAudio first for low-latency USB PCM in both directions. Retain Android framework audio as a comparison or route-specific fallback if measurements justify it. See the [Phase 0 audit](AUDIT.md) for routing and latency acceptance checks.
@@ -95,6 +97,8 @@ Prefer Hamlib's existing streaming architecture once its support for generic aud
 ### Phase 4: integration and shared dependencies
 
 Build a reusable client adapter/library if needed (existing modem audio abstractions, rather than rewriting DSP). Demonstrate one existing Android modem with shared CAT/audio and one independent RX client. Package a shared Android hardware library only when the boundary is justified; offer it to JS8Android and other interested projects. Evaluate licensing before sharing components across projects.
+
+Use JS8Android as the first modem client. Feed its existing decoder from the service’s PCM stream through an explicit rigctld audio source in the client. First decode over FX-4CR USB with CAT active. Once Bluetooth audio is also verified, switch the FX-4CR profile from USB to Bluetooth in Android rigctld and recover decoding with the same JS8Android settings. Repeat across two rigs once the (tr)uSDX adapter is available.
 
 ## Working style
 
