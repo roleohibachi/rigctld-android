@@ -44,6 +44,8 @@ public final class MainActivity extends Activity {
     private Button refresh;
     private Spinner transport;
     private Spinner ports;
+    private Spinner usbAudioInputs;
+    private TextView usbAudioDetails;
     private EditText rigModel;
     private EditText baud;
     private CheckBox rtsCts;
@@ -140,6 +142,7 @@ public final class MainActivity extends Activity {
         diagnostics.setText("Copy diagnostics");
         diagnostics.setOnClickListener(view -> copyDiagnostics());
         content.addView(diagnostics);
+        addUsbAudioPicker(content);
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
         setContentView(scroll);
@@ -164,6 +167,7 @@ public final class MainActivity extends Activity {
             registerReceiver(receiver, filter);
         }
         render();
+        refreshUsbAudioInputs();
     }
 
     @Override
@@ -191,6 +195,46 @@ public final class MainActivity extends Activity {
         ArrayAdapter<T> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, items);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         return adapter;
+    }
+
+    private void addUsbAudioPicker(LinearLayout content) {
+        TextView label = new TextView(this);
+        label.setText("USB audio input diagnostics");
+        content.addView(label);
+        usbAudioInputs = new Spinner(this);
+        usbAudioInputs.setContentDescription("USB audio input to inspect");
+        content.addView(usbAudioInputs);
+        usbAudioDetails = new TextView(this);
+        content.addView(usbAudioDetails);
+        usbAudioInputs.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long itemId) {
+                UsbAudioInputs.Input input = (UsbAudioInputs.Input) parent.getItemAtPosition(position);
+                usbAudioDetails.setText(String.join("\n", input.endpoints()) + "\nCapture is not available yet.");
+            }
+
+            @Override public void onNothingSelected(AdapterView<?> parent) {
+                usbAudioDetails.setText("Connect a USB audio input, then refresh.");
+            }
+        });
+        Button refreshAudio = new Button(this);
+        refreshAudio.setText("Refresh USB audio inputs");
+        refreshAudio.setOnClickListener(view -> refreshUsbAudioInputs());
+        content.addView(refreshAudio);
+    }
+
+    private void refreshUsbAudioInputs() {
+        UsbAudioInputs.Input previous = (UsbAudioInputs.Input) usbAudioInputs.getSelectedItem();
+        List<UsbAudioInputs.Input> inputs = UsbAudioInputs.list(getSystemService(UsbManager.class));
+        usbAudioInputs.setAdapter(adapter(inputs));
+        usbAudioInputs.setEnabled(!inputs.isEmpty());
+        if (inputs.isEmpty()) usbAudioDetails.setText("Connect a USB audio input, then refresh.");
+        if (previous == null) return;
+        for (int i = 0; i < inputs.size(); i++) {
+            if (inputs.get(i).deviceName().equals(previous.deviceName())) {
+                usbAudioInputs.setSelection(i);
+                break;
+            }
+        }
     }
 
     private EditText numberInput(String label, String value) {
@@ -342,7 +386,13 @@ public final class MainActivity extends Activity {
                 + " · USB RTS/CTS " + radio.rtsCts + "\n"
                 + "CAT PTT enabled " + radio.allowPtt + "\n";
         }
-        report += state.message;
-        getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("CAT diagnostics", report));
+        StringBuilder diagnostics = new StringBuilder(report).append(state.message).append("\nUSB audio inputs:");
+        List<UsbAudioInputs.Input> inputs = UsbAudioInputs.list(getSystemService(UsbManager.class));
+        if (inputs.isEmpty()) diagnostics.append(" none");
+        for (UsbAudioInputs.Input input : inputs) {
+            diagnostics.append('\n').append(input.label()).append(" · ")
+                .append(String.join("; ", input.endpoints()));
+        }
+        getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("rigctld diagnostics", diagnostics));
     }
 }

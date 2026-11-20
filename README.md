@@ -31,6 +31,8 @@ bash scripts/docker-build.sh test
 
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. It targets ARM64 devices and declares Android 12 (API 31) as its minimum. Device qualification is tracked separately in the [hardware matrix](HANDOFF.md#hardware-and-android-coverage).
 
+To inspect inputs for the receive-audio milestone, connect the rig and tap **Refresh USB audio inputs**. Select an entry to see its USB vendor and product IDs and capture endpoints. The list uses USB host enumeration, which can see interfaces omitted by Android's audio picker. **Copy diagnostics** includes the detected inputs and endpoints. On the FX-4CR, look for both `0d8c:013c` (C-Media) and `0a12:4007` (QCC3024). This picker is for enumeration. Capture verification is a separate step.
+
 ## Verify on a phone
 
 Use ADB and a desktop Hamlib installation on a machine that can reach the phone. Install the APK, open Android rigctld, select **Dummy rig** and tap **Start**. With the screen showing **Listening on 127.0.0.1:4532**, run:
