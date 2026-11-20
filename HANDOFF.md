@@ -55,7 +55,7 @@ Deliver `AUDIT.md` with architecture/data-flow maps, a file/symbol inventory, de
 
 ## Hardware and Android coverage
 
-The project owner’s only Android device is a Pixel 8a. Record its installed Android version in test results. Their radios cover these paths:
+The project owner’s only Android device is a Pixel 8a. The first reported run used Android 17 (API 37). See [verification status](README.md#verification-status) for completed checks. Their radios cover these paths:
 
 | Rig | CAT and audio paths to verify |
 | --- | --- |

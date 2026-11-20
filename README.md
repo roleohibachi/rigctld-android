@@ -1,6 +1,10 @@
 # Android rigctld
 
-Android rigctld provides a local CAT service over USB serial or classic Bluetooth RFCOMM. Use the Hamlib dummy rig to check the service and protocol without connecting a radio. Physical-radio and on-device validation are pending. Shared USB and Bluetooth audio are planned for a later phase.
+Android rigctld provides a local CAT service over USB serial or classic Bluetooth RFCOMM. Use the Hamlib dummy rig to check the service and protocol without connecting a radio. Shared USB and Bluetooth audio are planned for a later phase.
+
+## Verification status
+
+The owner installed debug build `0.1-dev` on a Pixel 8a running Android 17 (API 37) and confirmed that the Hamlib dummy rig (model 1) listened on `127.0.0.1:4532`. The report confirms installation and listener startup. CAT client readback, stop/restart and physical transports still need device test results.
 
 ## Build and test with Docker
 
@@ -32,6 +36,8 @@ Check that frequency and mode are returned. Tap **Stop**, check that `rigctl` ca
 1. Connect the USB cable or pair the radio in Android’s Bluetooth settings. Select the corresponding transport, tap **Refresh ports**, and select the port. Enter the Hamlib model ID and optionally override its baud rate. USB uses the app’s RTS/CTS checkbox, off by default. Turn it on if your rig and adapter require hardware flow control.
 2. Tap **Start** and grant USB access if prompted. Use `rigctl -m 2 -r 127.0.0.1:14532 f`, `m` and `t` to query frequency, mode and PTT through the same ADB forward. Then verify a frequency and mode change. Try stop/restart and disconnect/reconnect for each applicable combination in the [hardware matrix](HANDOFF.md#hardware-and-android-coverage).
 3. For an issue, use **Copy diagnostics** and include the shortest reproduction, firmware version and settings. The copy includes the last session’s build, model and transport and omits the selected device path.
+
+Start the hardware matrix with the FX-4CR over USB using BG2FX model **2053**. Leave **Allow CAT PTT** unchecked. Compare the frequency and mode returned by CAT with the rig’s display and include those results and the PTT status when reporting the test.
 
 The listener binds to loopback. Other Android apps can connect locally. Physical sessions expose common CAT commands and require explicit opt-in to key the radio. With that opt-in, one connection can claim PTT, with release attempted on owner disconnect, a three-minute timeout or service stop. The app reports an unconfirmed release if the CAT link fails. Perform actual keying checks deliberately at low power into a dummy load.
 
