@@ -6,9 +6,11 @@ Android rigctld provides a local CAT service over USB serial or classic Bluetoot
 
 The owner installed debug build `0.1-dev` on a Pixel 8a running Android 17 (API 37) and confirmed that the Hamlib dummy rig (model 1) listened on `127.0.0.1:4532`.
 
-On the same phone, an FX-4CR connected over USB using the BG2FX backend (model 2053) and the CH340 interface (`1a86:7523`). Desktop `rigctl` over wireless ADB repeatedly returned 14,064,000 Hz, CW, 500 Hz passband and PTT off. This verifies read-only CAT on that combination. Writes, stop/restart and the other physical configurations still need device test results.
+On the same phone, an FX-4CR connected over USB using the BG2FX backend (model 2053) and the CH340 interface (`1a86:7523`). Desktop `rigctl` over wireless ADB repeatedly returned 14,064,000 Hz, CW, 500 Hz passband and PTT off. This verifies read-only CAT on that combination. USB writes, stop/restart and the other physical configurations still need device test results.
 
 The owner also reported that Ham2K PoLo on the Pixel successfully connected to the same USB CAT session at `localhost:4532`.
+
+The FX-4CR also passed Bluetooth RFCOMM CAT using model 2053. The CAT frequency followed the owner’s dial change from 7,061,900 to 7,058,700 Hz. A direct rigctld `F` command then tuned to 7,058,800 Hz and a second command restored 7,058,700 Hz. Both returned `RPRT 0`, and each frequency was read back after a delay. PTT was off before and after. PoLo frequency changes remain unverified, and the rig’s hardware revision has yet to be recorded.
 
 ## Build and test with Docker
 
