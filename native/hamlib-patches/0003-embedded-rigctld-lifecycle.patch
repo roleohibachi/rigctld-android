@@ -1,0 +1,43 @@
+diff --git a/tests/rigctl_parse.c b/tests/rigctl_parse.c
+--- a/tests/rigctl_parse.c
++++ b/tests/rigctl_parse.c
+@@ -108,6 +108,10 @@
+ int is_rigctld;
+ extern int lock_mode; // used by rigctld
+ extern powerstat_t rig_powerstat;
++#ifdef HAMLIB_EMBEDDED_RIGCTLD
++extern int rigctld_embedded_authorize(const char *command, const char *argument, vfo_t vfo);
++extern void rigctld_embedded_completed(const char *command, const char *argument, int result);
++#endif
+ 
+ 
+ 
+@@ -1817,6 +1821,14 @@
+         else if (strcmp(cmd_entry->arg1, "Password") == 0) { preCmd = 1; }
+     }
+ 
++#ifdef HAMLIB_EMBEDDED_RIGCTLD
++    int authorization = rigctld_embedded_authorize(cmd_entry->name, p1, vfo);
++    if (authorization != RIG_OK)
++    {
++        retcode = authorization;
++    }
++    else
++#endif
+     if (use_password && !is_passwordOK && (cmd_entry->arg1 != NULL) && !preCmd)
+     {
+         rig_debug(RIG_DEBUG_ERR, "%s: password has not been provided\n", __func__);
+@@ -1868,6 +1880,13 @@
+         strncpy(client_version, rs->client_version, sizeof(client_version));
+     }
+ 
++
++#ifdef HAMLIB_EMBEDDED_RIGCTLD
++    if (authorization == RIG_OK)
++    {
++        rigctld_embedded_completed(cmd_entry->name, p1, retcode);
++    }
++#endif
+ 
+     if (retcode == -RIG_EIO)
+     {

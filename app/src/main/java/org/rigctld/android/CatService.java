@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package org.rigctld.android;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.bluetooth.BluetoothDevice;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.ServiceInfo;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import com.js8call.core.BluetoothSerialBridge;
+import com.js8call.core.UsbSerialBridge;
+
+public final class CatService extends Service {
+    static final String ACTION_STATUS = "org.rigctld.android.STATUS";
+    static final String ACTION_STOP = "org.rigctld.android.STOP";
+    static final String ENDPOINT = "127.0.0.1:4532";
+    private static final String CHANNEL = "cat";
+    private static final int NOTIFICATION = 1;
+
+    private static volatile Status status = new Status(false, "Stopped", null);
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private long server;
+    private boolean stopping;
+    private UsbSerialBridge usb;
+    private BluetoothSerialBridge bluetooth;
+    private RadioSelection selection;
+    private boolean watcherRegistered;
+    private String stoppedReason;
+
+    private final BroadcastReceiver detachWatcher = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (selection == null) return;
+            if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
+                UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                if (device != null && selection.path.startsWith("android-usb:" + device.getDeviceId() + ":")) {
+                    stoppedReason = "USB device disconnected";
+                    requestStop();
+                }
+            } else if (BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(intent.getAction())) {
+                BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (device != null && selection.path.regionMatches(true, 11,
+                    device.getAddress().replace(":", ""), 0, 12)) {
+                    stoppedReason = "Bluetooth device disconnected";
+                    requestStop();
+                }
+            }
+        }
+    };
+
+    static final class Status {
+        final boolean active;
+        final String message;
+        final RadioSelection radio;
+
+        Status(boolean active, String message, RadioSelection radio) {
+            this.active = active;
+            this.message = message;
+            this.radio = radio;
+        }
+    }
+
+    static Status status() {
+        return status;
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            requestStop();
+            return START_NOT_STICKY;
+        }
+        if (server != 0 || intent == null) return START_NOT_STICKY;
+        selection = RadioSelection.readFrom(intent);
+        boolean valid = selection.valid();
+        int foregroundType = valid && selection.transport != RadioSelection.DUMMY
+            ? ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            : (Build.VERSION.SDK_INT >= 34 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE : 0);
+        try {
+            startForeground(NOTIFICATION, notification("Opening CAT service"), foregroundType);
+            if (!valid) {
+                finish("Invalid rig or port");
+                return START_NOT_STICKY;
+            }
+            publish(true, "Opening CAT service");
+            System.loadLibrary("android_rigctld");
+            registerTransport();
+            server = nativeCreate();
+        } catch (RuntimeException | LinkageError error) {
+            finish("Could not start CAT: " + error.getMessage());
+            return START_NOT_STICKY;
+        }
+        if (server == 0) {
+            finish("Could not allocate the CAT server");
+            return START_NOT_STICKY;
+        }
+        final long runningServer = server;
+        RadioSelection activeSelection = selection;
+        new Thread(() -> runServer(runningServer, activeSelection), "rigctld").start();
+        return START_NOT_STICKY;
+    }
+
+    private void registerTransport() {
+        String detachAction;
+        if (selection.transport == RadioSelection.USB) {
+            usb = new UsbSerialBridge(this, selection.rtsCts);
+            usb.registerNative();
+            detachAction = UsbManager.ACTION_USB_DEVICE_DETACHED;
+        } else if (selection.transport == RadioSelection.BLUETOOTH) {
+            bluetooth = new BluetoothSerialBridge(this);
+            bluetooth.registerNative();
+            detachAction = BluetoothDevice.ACTION_ACL_DISCONNECTED;
+        } else {
+            return;
+        }
+        IntentFilter filter = new IntentFilter(detachAction);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(detachWatcher, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(detachWatcher, filter);
+        }
+        watcherRegistered = true;
+    }
+
+    private void runServer(long runningServer, RadioSelection radio) {
+        String error;
+        try {
+            error = nativeRun(runningServer, radio.model, radio.path, radio.baud,
+                radio.rtsCts ? "Hardware" : "None", radio.allowPtt);
+        } catch (RuntimeException | LinkageError failure) {
+            error = "CAT server failed: " + failure.getMessage();
+        }
+        final String result = error;
+        main.post(() -> finish(result));
+    }
+
+    private void onNativeListening() {
+        main.post(() -> {
+            if (!stopping && server != 0) {
+                String message = "Listening on " + ENDPOINT;
+                publish(true, message);
+                getSystemService(NotificationManager.class).notify(NOTIFICATION, notification(message));
+            }
+        });
+    }
+
+    private void requestStop() {
+        if (server == 0) {
+            stopSelf();
+        } else if (!stopping) {
+            stopping = true;
+            publish(true, "Stopping");
+            if (bluetooth != null) bluetooth.cancelPendingOpen();
+            nativeStop(server);
+        }
+    }
+
+    private void finish(String error) {
+        if (server != 0) {
+            nativeDestroy(server);
+            server = 0;
+        }
+        if (watcherRegistered) {
+            unregisterReceiver(detachWatcher);
+            watcherRegistered = false;
+        }
+        if (usb != null) {
+            usb.unregisterNative();
+            usb.shutdown();
+            usb = null;
+        }
+        if (bluetooth != null) {
+            bluetooth.unregisterNative();
+            bluetooth.shutdown();
+            bluetooth = null;
+        }
+        publish(false, error != null ? error : stoppedReason != null ? stoppedReason : "Stopped");
+        selection = null;
+        stoppedReason = null;
+        stopping = false;
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
+    }
+
+    @Override
+    public void onDestroy() {
+        if (server != 0) requestStop();
+        super.onDestroy();
+    }
+
+    private void publish(boolean active, String message) {
+        status = new Status(active, message, selection);
+        sendBroadcast(new Intent(ACTION_STATUS).setPackage(getPackageName()));
+    }
+
+    private Notification notification(String message) {
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(
+            new NotificationChannel(CHANNEL, "CAT server", NotificationManager.IMPORTANCE_LOW));
+        PendingIntent show = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
+            PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent stop = PendingIntent.getService(this, 0,
+            new Intent(this, CatService.class).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setContentTitle("Android rigctld")
+            .setContentText(message)
+            .setContentIntent(show)
+            .addAction(new Notification.Action.Builder(null, "Stop", stop).build())
+            .setOngoing(true)
+            .build();
+    }
+
+    private static native long nativeCreate();
+    private native String nativeRun(long handle, int model, String path, String baud, String handshake, boolean allowPtt);
+    private static native void nativeStop(long handle);
+    private static native void nativeDestroy(long handle);
+}
