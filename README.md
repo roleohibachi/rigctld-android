@@ -4,7 +4,9 @@ Android rigctld provides a local CAT service over USB serial or classic Bluetoot
 
 ## Verification status
 
-The owner installed debug build `0.1-dev` on a Pixel 8a running Android 17 (API 37) and confirmed that the Hamlib dummy rig (model 1) listened on `127.0.0.1:4532`. The report confirms installation and listener startup. CAT client readback, stop/restart and physical transports still need device test results.
+The owner installed debug build `0.1-dev` on a Pixel 8a running Android 17 (API 37) and confirmed that the Hamlib dummy rig (model 1) listened on `127.0.0.1:4532`.
+
+On the same phone, an FX-4CR connected over USB using the BG2FX backend (model 2053) and the CH340 interface (`1a86:7523`). Desktop `rigctl` over wireless ADB repeatedly returned 14,064,000 Hz, CW, 500 Hz passband and PTT off. This verifies read-only CAT on that combination. Writes, stop/restart and the other physical configurations still need device test results.
 
 ## Build and test with Docker
 
@@ -38,6 +40,8 @@ Check that frequency and mode are returned. Tap **Stop**, check that `rigctl` ca
 3. For an issue, use **Copy diagnostics** and include the shortest reproduction, firmware version and settings. The copy includes the last session’s build, model and transport and omits the selected device path.
 
 Start the hardware matrix with the FX-4CR over USB using BG2FX model **2053**. Leave **Allow CAT PTT** unchecked. Compare the frequency and mode returned by CAT with the rig’s display and include those results and the PTT status when reporting the test.
+
+For wireless ADB, keep the phone’s USB port available for the rig. Before starting USB CAT, disconnect any other app that is using the rig’s CAT port. If **Refresh ports** is empty, `adb shell dumpsys usb` can distinguish an absent USB device from a device that Android sees but the app does not list. USB baud settings take effect after port detection.
 
 The listener binds to loopback. Other Android apps can connect locally. Physical sessions expose common CAT commands and require explicit opt-in to key the radio. With that opt-in, one connection can claim PTT, with release attempted on owner disconnect, a three-minute timeout or service stop. The app reports an unconfirmed release if the CAT link fails. Perform actual keying checks deliberately at low power into a dummy load.
 
