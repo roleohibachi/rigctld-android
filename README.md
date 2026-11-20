@@ -14,6 +14,8 @@ The FX-4CR also passed Bluetooth RFCOMM CAT using model 2053. The CAT frequency 
 
 The owner verified spot tuning in Ham2K Logger Next (HaLo) 26.11.0 over the same Bluetooth CAT session after selecting its rigctld equipment model. A temporary CAT trace showed raw Kenwood commands with the original client profile and valid rigctld replies after the change, including a readback of 14,338,000 Hz in USB mode.
 
+The owner reported successful CW decoding in stock GGMorse with the FX-4CR connected over USB to the Pixel 8a, without an audio adapter or an in-app source selector. Android can automatically route capture to a compatible USB audio device. The active recording device was not independently confirmed. [Android USB audio](https://source.android.com/docs/core/audio/usb#host-mode-applications)
+
 ## Build and test with Docker
 
 From a Linux host with Docker access, run these commands from the workspace root. The Android image downloads the pinned SDK, NDK and build tools and accepts Google’s Android SDK licenses inside the image.
