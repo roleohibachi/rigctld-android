@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 
 namespace {
@@ -88,7 +89,7 @@ bool is_cancelled(JNIEnv* env, jobject cancelled, jmethodID get) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     JNIEnv* env, jclass, jint fd, jint endpoint, jint packet_size, jint channels,
-    jobject cancelled, jobject update, jlong server_handle) {
+    jobject cancelled, jobject update, jlong server_handle, jobject playback) {
     auto* server = reinterpret_cast<RigctldServer*>(server_handle);
     auto* audio = server ? server->audio() : nullptr;
     if (fd < 0 || packet_size <= 0 || packet_size > max_packet_size
@@ -102,6 +103,15 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     if (update) {
         accept = env->GetMethodID(env->GetObjectClass(update), "accept", "(Ljava/lang/Object;)V");
         if (!accept) return nullptr;
+    }
+    std::array<unsigned char, packets_per_transfer * max_packet_size> playback_buffer;
+    jmethodID play = nullptr;
+    jobject playback_samples = nullptr;
+    if (playback) {
+        play = env->GetMethodID(env->GetObjectClass(playback), "write", "(Ljava/nio/ByteBuffer;I)V");
+        if (!play) return nullptr;
+        playback_samples = env->NewDirectByteBuffer(playback_buffer.data(), playback_buffer.size());
+        if (!playback_samples) return nullptr;
     }
 
     TransferQueue queue{fd, {}};
@@ -159,6 +169,7 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
             error = -completed->status;
             break;
         }
+        int playback_bytes = 0;
         for (int i = 0; i < packets_per_transfer; ++i) {
             const auto& packet = completed->iso_frame_desc[i];
             if (!audio) ++packets;
@@ -171,10 +182,18 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
             if (audio && packet.actual_length > 0) {
                 embedded_audio_push(audio, data, packet.actual_length);
                 last_frames = Clock::now();
+                if (playback) {
+                    std::memcpy(playback_buffer.data() + playback_bytes, data, packet.actual_length);
+                    playback_bytes += packet.actual_length;
+                }
             } else if (!audio) {
                 total.add(data, packet.actual_length, channels);
                 recent.add(data, packet.actual_length, channels);
             }
+        }
+        if (playback_bytes > 0) {
+            env->CallVoidMethod(playback, play, playback_samples, playback_bytes);
+            if (env->ExceptionCheck()) return nullptr;
         }
         if (update && ((audio && !reported_ready && last_frames != start)
                        || (!audio && Clock::now() >= next_update))) {

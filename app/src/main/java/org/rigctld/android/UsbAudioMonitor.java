@@ -33,11 +33,11 @@ final class UsbAudioMonitor {
 
     static String measure(UsbManager manager, UsbDevice device, AtomicBoolean cancelled,
                           Consumer<String> update) {
-        return capture(manager, device, cancelled, update, 0);
+        return capture(manager, device, cancelled, update, 0, null);
     }
 
     static String capture(UsbManager manager, UsbDevice device, AtomicBoolean cancelled,
-                          Consumer<String> update, long server) {
+                          Consumer<String> update, long server, ReceivePlayback playback) {
         Format format = format(device);
         if (format == null) return "This USB input does not have a monitor format yet.";
         UsbInterface idle = null;
@@ -75,7 +75,7 @@ final class UsbAudioMonitor {
                 }
                 System.loadLibrary("android_rigctld");
                 return nativeMeasure(connection.getFileDescriptor(), endpoint.getAddress(),
-                    endpoint.getMaxPacketSize(), format.channels(), cancelled, update, server);
+                    endpoint.getMaxPacketSize(), format.channels(), cancelled, update, server, playback);
             } finally {
                 connection.setInterface(idle);
                 connection.releaseInterface(stream);
@@ -86,7 +86,8 @@ final class UsbAudioMonitor {
     }
 
     private static native String nativeMeasure(int fd, int endpoint, int packetSize, int channels,
-                                               AtomicBoolean cancelled, Consumer<String> update, long server);
+                                               AtomicBoolean cancelled, Consumer<String> update, long server,
+                                               ReceivePlayback playback);
 
     private UsbAudioMonitor() {}
 }

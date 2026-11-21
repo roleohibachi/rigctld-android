@@ -14,6 +14,7 @@ import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -21,6 +22,7 @@ import android.os.Looper;
 import com.js8call.core.BluetoothSerialBridge;
 import com.js8call.core.UsbSerialBridge;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 public final class CatService extends Service {
     static final String ACTION_STATUS = "org.rigctld.android.STATUS";
@@ -35,6 +37,7 @@ public final class CatService extends Service {
     private boolean stopping;
     private boolean listening;
     private String audioStatus;
+    private String playbackStatus;
     private UsbSerialBridge usb;
     private BluetoothSerialBridge bluetooth;
     private RadioSelection selection;
@@ -95,6 +98,7 @@ public final class CatService extends Service {
         int foregroundType = valid && selection.transport != RadioSelection.DUMMY
             ? ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             : (Build.VERSION.SDK_INT >= 34 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE : 0);
+        if (valid && selection.receivePlayback) foregroundType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
         try {
             startForeground(NOTIFICATION, notification("Opening CAT service"), foregroundType);
             if (!valid) {
@@ -147,7 +151,7 @@ public final class CatService extends Service {
         String error;
         try {
             if (radio.usbAudioPath != null) {
-                capture = new Thread(() -> runUsbAudio(runningServer, radio.usbAudioPath, cancelAudio), "rigctld-usb-audio");
+                capture = new Thread(() -> runUsbAudio(runningServer, radio, cancelAudio), "rigctld-usb-audio");
                 capture.start();
             }
             error = nativeRun(runningServer, radio.model, radio.path, radio.baud,
@@ -173,32 +177,46 @@ public final class CatService extends Service {
         main.post(() -> finish(result));
     }
 
-    private void runUsbAudio(long runningServer, String path, AtomicBoolean cancelled) {
+    private void runUsbAudio(long runningServer, RadioSelection radio, AtomicBoolean cancelled) {
         String outcome;
         try {
             UsbManager manager = getSystemService(UsbManager.class);
-            UsbDevice device = manager.getDeviceList().get(path);
+            UsbDevice device = manager.getDeviceList().get(radio.usbAudioPath);
             if (!UsbAudioMonitor.supportsRxStream(device) || !manager.hasPermission(device)) {
                 outcome = "Selected USB audio input unavailable";
             } else {
-                outcome = UsbAudioMonitor.capture(manager, device, cancelled, ready -> main.post(() -> {
-                    if (server != runningServer || stopping) return;
-                    audioStatus = ready;
-                    if (listening) publishListening();
-                }), runningServer);
+                Consumer<String> ready = message -> postAudioStatus(runningServer, message, false);
+                try (ReceivePlayback playback = radio.receivePlayback ? openPlayback(runningServer) : null) {
+                    outcome = UsbAudioMonitor.capture(manager, device, cancelled, ready, runningServer, playback);
+                }
             }
         } catch (RuntimeException | LinkageError failure) {
             outcome = "USB audio failed: " + failure.getMessage();
         }
         nativeAudioFailed(runningServer);
         if (!cancelled.get()) {
-            String message = outcome;
-            main.post(() -> {
-                if (server != runningServer || stopping) return;
-                audioStatus = message;
-                if (listening) publishListening();
-            });
+            postAudioStatus(runningServer, outcome, false);
+            if (radio.receivePlayback) postAudioStatus(runningServer, "Receive playback stopped · USB audio ended", true);
         }
+    }
+
+    private ReceivePlayback openPlayback(long runningServer) {
+        Consumer<String> update = message -> postAudioStatus(runningServer, message, true);
+        try {
+            return new ReceivePlayback(getSystemService(AudioManager.class), main, update);
+        } catch (RuntimeException failure) {
+            update.accept("Receive playback unavailable · " + failure.getMessage());
+            return null;
+        }
+    }
+
+    private void postAudioStatus(long runningServer, String message, boolean playback) {
+        main.post(() -> {
+            if (server != runningServer || stopping) return;
+            if (playback) playbackStatus = message;
+            else audioStatus = message;
+            if (listening) publishListening();
+        });
     }
 
     private void onNativeListening() {
@@ -214,6 +232,9 @@ public final class CatService extends Service {
         String message = "Listening on " + ENDPOINT;
         if (selection.usbAudioPath != null) {
             message += "\n" + (audioStatus == null ? "Opening C-Media USB receive audio" : audioStatus);
+        }
+        if (selection.receivePlayback) {
+            message += "\n" + (playbackStatus == null ? "Opening receive playback" : playbackStatus);
         }
         publish(true, message);
         getSystemService(NotificationManager.class).notify(NOTIFICATION, notification(message));
@@ -255,6 +276,7 @@ public final class CatService extends Service {
         stopping = false;
         listening = false;
         audioStatus = null;
+        playbackStatus = null;
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }

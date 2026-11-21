@@ -53,6 +53,7 @@ public final class MainActivity extends Activity {
     private Button monitorAudio;
     private Button refreshAudio;
     private CheckBox shareAudio;
+    private CheckBox receivePlayback;
     private UsbDevice pendingAudioDevice;
     private RadioSelection pendingAudioRadio;
     private AtomicBoolean monitorCancelled;
@@ -246,6 +247,9 @@ public final class MainActivity extends Activity {
             render();
         });
         content.addView(shareAudio);
+        receivePlayback = new CheckBox(this);
+        receivePlayback.setText("Play receive audio for capture apps");
+        content.addView(receivePlayback);
         monitorAudio = new Button(this);
         monitorAudio.setText("Monitor");
         monitorAudio.setOnClickListener(view -> {
@@ -294,8 +298,11 @@ public final class MainActivity extends Activity {
         monitorAudio.setText(running ? "Stop monitor" : "Monitor");
         monitorAudio.setEnabled(running ? !monitorCancelled.get()
             : available && UsbAudioMonitor.supports(selectedAudioDevice()));
-        shareAudio.setVisibility(transport.getSelectedItemPosition() == RadioSelection.USB ? View.VISIBLE : View.GONE);
+        boolean usbSelected = transport.getSelectedItemPosition() == RadioSelection.USB;
+        shareAudio.setVisibility(usbSelected ? View.VISIBLE : View.GONE);
         shareAudio.setEnabled(available && !state.active && awaitingUsbPermission == null);
+        receivePlayback.setVisibility(usbSelected && shareAudio.isChecked() ? View.VISIBLE : View.GONE);
+        receivePlayback.setEnabled(shareAudio.isEnabled());
     }
 
     private void requestAudioMonitor() {
@@ -484,7 +491,8 @@ public final class MainActivity extends Activity {
             audioPath = audio.getDeviceName();
         }
         RadioSelection selection = new RadioSelection(choice, model, port.path, rate,
-            choice == RadioSelection.USB && rtsCts.isChecked(), audioPath == null && allowPtt.isChecked(), audioPath);
+            choice == RadioSelection.USB && rtsCts.isChecked(), audioPath == null && allowPtt.isChecked(),
+            audioPath, audioPath != null && receivePlayback.isChecked());
         if (selection.allowPtt) {
             new AlertDialog.Builder(this).setTitle("Allow PTT for this session?")
                 .setMessage("Local rigctld clients can key the radio. For testing, connect a dummy load and select low power.")

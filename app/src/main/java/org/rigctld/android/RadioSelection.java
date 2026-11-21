@@ -15,13 +15,14 @@ final class RadioSelection {
     final boolean rtsCts;
     final boolean allowPtt;
     final String usbAudioPath;
+    final boolean receivePlayback;
 
     RadioSelection(int transport, int model, String path, String baud, boolean rtsCts, boolean allowPtt) {
-        this(transport, model, path, baud, rtsCts, allowPtt, null);
+        this(transport, model, path, baud, rtsCts, allowPtt, null, false);
     }
 
     RadioSelection(int transport, int model, String path, String baud, boolean rtsCts, boolean allowPtt,
-                   String usbAudioPath) {
+                   String usbAudioPath, boolean receivePlayback) {
         this.transport = transport;
         this.model = model;
         this.path = path;
@@ -29,6 +30,7 @@ final class RadioSelection {
         this.rtsCts = rtsCts;
         this.allowPtt = allowPtt;
         this.usbAudioPath = usbAudioPath;
+        this.receivePlayback = receivePlayback;
     }
 
     void writeTo(Intent intent) {
@@ -39,6 +41,7 @@ final class RadioSelection {
         intent.putExtra("rtsCts", rtsCts);
         intent.putExtra("allowPtt", allowPtt);
         intent.putExtra("usbAudioPath", usbAudioPath);
+        intent.putExtra("receivePlayback", receivePlayback);
     }
 
     static RadioSelection readFrom(Intent intent) {
@@ -46,11 +49,12 @@ final class RadioSelection {
             intent.getIntExtra("transport", DUMMY), intent.getIntExtra("model", 1),
             intent.getStringExtra("path"), intent.getStringExtra("baud"),
             intent.getBooleanExtra("rtsCts", false), intent.getBooleanExtra("allowPtt", false),
-            intent.getStringExtra("usbAudioPath"));
+            intent.getStringExtra("usbAudioPath"), intent.getBooleanExtra("receivePlayback", false));
     }
 
     boolean valid() {
         if (usbAudioPath != null && (transport != USB || allowPtt)) return false;
+        if (receivePlayback && usbAudioPath == null) return false;
         if (transport == DUMMY) return model == 1 && (path == null || path.isEmpty());
         if (model <= 1 || path == null) return false;
         if (transport == USB) return path.matches("android-usb:[0-9]+:[0-9]+");

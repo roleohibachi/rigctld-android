@@ -43,6 +43,12 @@ The monitor claims the selected USB capture interface for five seconds and displ
 
 To test shared receive audio on the FX-4CR, stop the short monitor, choose **USB serial** for CAT, and select **C-Media (`0d8c:013c`)**. Enable **Share selected USB audio (receive only)** and tap **Start**. Grant microphone and USB permissions if prompted. When status shows **C-Media USB receive ready**, a local Hamlib streaming client built from the pinned revision can request one 48 kHz mono PCM16 stream at `127.0.0.1:4532`. Confirm sample level changes with the FX-4CR AUX output and check CAT frequency readback on a second connection. On USB disconnect the client must stop using the stream. Reconnect the rig, refresh the ports and inputs, and restart the service. The client can reopen at the same address. JS8Android needs a rigctld audio adapter to consume this stream.
 
+### Robot36 Playback Capture
+
+Put the radio in receive-only mode, then follow the shared receive setup above. Before tapping **Start**, also enable **Play receive audio for capture apps**. Wait for **Receive playback ready · phone speaker**. Rigctld starts with silence, checks the phone speaker route, and stops playback if Android changes it. The network stream can continue independently.
+
+Open a Robot36 build with **Playback Capture** and tap that control to grant Android's capture permission. Keep other media playback off during the test. Check for a live waterfall and try decoding a known SSTV transmission. Set the rig's AUX level for a clear signal. If rigctld reports that the route changed, include its status and `adb shell dumpsys media.audio_policy` output in the report. Robot36's `v2.17` tag uses microphone capture. The separate **Robot36 Playback Test** APK was built from `2af2390954aa248725042ba6b1332bbcca68c357` with SDK and target API 35 and app ID `xdsopl.robot36.rigctldtest`. [Robot36 input modes](https://github.com/xdsopl/robot36#audio-inputs)
+
 ## Verify on a phone
 
 Use ADB and a desktop Hamlib installation on a machine that can reach the phone. Install the APK, open Android rigctld, select **Dummy rig** and tap **Start**. With the screen showing **Listening on 127.0.0.1:4532**, run:
