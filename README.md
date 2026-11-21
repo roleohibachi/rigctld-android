@@ -26,6 +26,8 @@ The Docker host suite verifies 48 kHz mono PCM16 over IPv4 loopback UDP from the
 
 On the Pixel 8a, build `df54398` streamed FX-4CR C-Media audio to the pinned Hamlib `rigstreamtest` client on loopback. During a five-second 48 kHz mono float32 receive test, the client reported 915,396 bytes, nonzero levels and zero gaps, overruns and underruns. A concurrent CAT frequency query returned 7,046,700 Hz. A second client connection opened native PCM16 and reported 255,728 bytes with zero gaps over three seconds. The pinned diagnostic client logs a warning when it parses the extended `stream_caps:` response header and uses float32 to display levels even for PCM16. Measure levels in its default float32 mode. USB reconnect and JS8Android decoding through the stream are still pending.
 
+The owner reported that Robot36 Playback Test (`2af2390`) successfully received FX-4CR audio through rigctld's Playback Capture bridge (`845953a`) on the Pixel 8a. SSTV image decoding was not reported. The test APK was installed alongside the stock Robot36 release.
+
 ## Build and test with Docker
 
 From a Linux host with Docker access, run these commands from the workspace root. The Android image downloads the pinned SDK, NDK and build tools and accepts Google’s Android SDK licenses inside the image.
