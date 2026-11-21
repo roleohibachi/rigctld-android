@@ -28,6 +28,8 @@ On the Pixel 8a, build `df54398` streamed FX-4CR C-Media audio to the pinned Ham
 
 The owner reported that Robot36 Playback Test (`2af2390`) successfully received FX-4CR audio through rigctld's Playback Capture bridge (`845953a`) on the Pixel 8a. SSTV image decoding was not reported. The test APK was installed alongside the stock Robot36 release.
 
+The owner verified that **GGMorse Rigctld** receives the FX-4CR's network stream on the Pixel 8a. Its signal level followed the rig's line level, and the owner observed apparent CW decoding. A separate software test fed a 700 Hz, 18 WPM synthetic signal through the embedded Hamlib daemon to the same JNI receiver and decoded `CQ CQ DE TEST` after an initial misread letter. The Play Store GGMorse app coexisted with the test app on the Pixel.
+
 ## Build and test with Docker
 
 From a Linux host with Docker access, run these commands from the workspace root. The Android image downloads the pinned SDK, NDK and build tools and accepts Google’s Android SDK licenses inside the image.
@@ -50,6 +52,12 @@ To test shared receive audio on the FX-4CR, stop the short monitor, choose **USB
 Put the radio in receive-only mode, then follow the shared receive setup above. Before tapping **Start**, also enable **Play receive audio for capture apps**. Wait for **Receive playback ready · phone speaker**. Rigctld starts with silence, checks the phone speaker route, and stops playback if Android changes it. The network stream can continue independently.
 
 Open a Robot36 build with **Playback Capture** and tap that control to grant Android's capture permission. Keep other media playback off during the test. Check for a live waterfall and try decoding a known SSTV transmission. Set the rig's AUX level for a clear signal. If rigctld reports that the route changed, include its status and `adb shell dumpsys media.audio_policy` output in the report. Robot36's `v2.17` tag uses microphone capture. The separate **Robot36 Playback Test** APK was built from `2af2390954aa248725042ba6b1332bbcca68c357` with SDK and target API 35 and app ID `xdsopl.robot36.rigctldtest`. [Robot36 input modes](https://github.com/xdsopl/robot36#audio-inputs)
+
+### GGMorse over rigctld
+
+Run `bash scripts/docker-build.sh ggmorse` to build the separate **GGMorse Rigctld** app. The APK is `ggmorse-client/build/outputs/apk/debug/ggmorse-client-debug.apk`. The build uses the upstream decoder pinned in `ggmorse-client/upstream-version` and the same Hamlib revision as the daemon.
+
+Start rigctld with **Share selected USB audio (receive only)** enabled. Tune to a readable CW signal at an audio pitch within GGMorse's detection range of 200–1,200 Hz. Open **GGMorse Rigctld**, tap **Connect**, and check for signal level and decoded text. The client opens 48 kHz mono PCM16 at `127.0.0.1:4532` and releases its receive stream on disconnect or when the app leaves the foreground. This is a separate receive-only app built with the public GGMorse library and can coexist with the Play Store app. [GGMorse source](https://github.com/ggerganov/ggmorse)
 
 ## Verify on a phone
 

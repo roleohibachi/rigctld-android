@@ -6,4 +6,6 @@
 /app/build/
 /.cxx/
 /app/.cxx/
+/ggmorse-client/build/
+/ggmorse-client/.cxx/
 /local.properties

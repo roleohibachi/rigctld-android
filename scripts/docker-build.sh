@@ -7,6 +7,10 @@ case "${1:-apk}" in
         target=android
         command='bash scripts/build-hamlib.sh android-arm64 && ./gradlew --no-daemon :app:assembleDebug'
         ;;
+    ggmorse)
+        target=android
+        command='bash scripts/build-hamlib.sh android-arm64 && bash scripts/build-ggmorse.sh'
+        ;;
     test)
         target=native
         command='bash scripts/build-hamlib.sh host &&
@@ -15,7 +19,7 @@ case "${1:-apk}" in
             read -r revision < native/hamlib-version &&
             python3 tests/test_rigctld.py .work/native/rigctld-host "${HAMLIB_WORK_DIR:-.work/hamlib/$revision}/build-host/tests/rigctl" -v'
         ;;
-    *) echo "Usage: $0 [apk|test]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [apk|ggmorse|test]" >&2; exit 2 ;;
 esac
 
 image="rigctld-$target-build"
