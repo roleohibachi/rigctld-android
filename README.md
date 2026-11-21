@@ -20,6 +20,8 @@ On the same USB setup, the owner reported a gray waterfall in Robot36 2.17 (67) 
 
 JS8Android also showed a blank waterfall on the Pixel. ADB matched its unsilenced capture to the QCC3024, and all 23 logged sample triplets were zero. On a Linux PC the same FX-4CR connection enumerated two audio inputs, the QCC3024 (`0a12:4007`) and the C-Media USB PnP Sound Device (`0d8c:013c`). `arecord -D hw:CARD=QCC3024,DEV=0 -f S16_LE -r 48000 -c 2 -d 4 -t raw /dev/null` failed with an I/O error and zero frames on two attempts. Using `hw:CARD=Device,DEV=0`, `-c 1` and `-d 8` captured 384,000 frames with a peak of 7,187 and RMS of 1,542 in signed 16-bit units. Decoding a known signal and selecting the C-Media input on the Pixel remain to be tested.
 
+The owner confirmed that the USB audio diagnostics picker from `5a5cda7` lists both FX-4CR inputs on the Pixel 8a. Opening the C-Media capture endpoint and receiving samples on the Pixel remain unverified.
+
 ## Build and test with Docker
 
 From a Linux host with Docker access, run these commands from the workspace root. The Android image downloads the pinned SDK, NDK and build tools and accepts Google’s Android SDK licenses inside the image.
