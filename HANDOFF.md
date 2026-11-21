@@ -106,6 +106,16 @@ Build a reusable client adapter/library if needed (existing modem audio abstract
 
 Use JS8Android as the first modem client. Feed its existing decoder from the service’s PCM stream through an explicit rigctld audio source in the client. First decode over FX-4CR USB with CAT active. Once Bluetooth audio is also verified, switch the FX-4CR profile from USB to Bluetooth in Android rigctld and recover decoding with the same JS8Android settings. Repeat across two rigs once the (tr)uSDX adapter is available.
 
+The JS8Android receive adapter is on the local branch `rigctld-audio-rx` in
+`.work/js8android-rigctld`. It uses Hamlib `af198ace7` for 48 kHz mono PCM16
+and keeps CAT on the existing network connection. See that checkout's
+`android/README.md` for build and receive checks. The signed side-by-side
+debug APK is staged as `js8android-rigctld-rx-debug.apk` in the Nextcloud ham
+folder. The ARM64 and ARM32 debug build and JS8Android app unit tests passed.
+A host JNI smoke test checked exact PCM through two consecutive RX sessions
+with a separate CAT connection open. Pixel decode with the FX-4CR and
+physical verification of the (tr)uSDX remain pending.
+
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
 Use stock [GGMorse](https://play.google.com/store/apps/details?id=com.ggerganov.GGMorse) to test apps that use the default recording input. On the Pixel 8a, connect the FX-4CR over USB, leave Android rigctld in CAT-only mode with PTT disabled, and close other audio capture apps. Tune to readable CW and open GGMorse with microphone permission. While it decodes, use `adb shell dumpsys media.audio_policy` and `adb shell dumpsys audio` to check the active recording route. Count this as verified only if GGMorse decodes CW and the active input is the rig's USB audio device. Record the Android build, app version, and route. Repeat with Bluetooth once its audio profile is known.
@@ -113,6 +123,17 @@ Use stock [GGMorse](https://play.google.com/store/apps/details?id=com.ggerganov.
 Android selects the default recording input for stock GGMorse. To make GGMorse follow the selected rig profile, evaluate feeding the same rigctld PCM endpoint used by JS8Android into GGMorse's decoder callback. Verify receive-only decoding with a fixed client configuration as the service switches routes. [Android input policy](https://developer.android.com/media/platform/sharing-audio-input) [GGMorse decoder API](https://github.com/ggerganov/ggmorse/blob/master/include/ggmorse/ggmorse.h)
 
 For Robot36, add a rigctld source alongside its existing audio sources. The development branch also supports user-approved Android playback capture, which could serve as an optional receive-only bridge for compatible builds. Robot36 2.17 uses microphone capture. If testing the playback bridge, verify that Robot36 receives rigctld audio and that local media playback stays off the rig's audio output. Overriding Android's system input policy or injecting microphone audio requires privileges unavailable to the stock APK. [Robot36 audio sources](https://github.com/xdsopl/robot36#audio-inputs) [Robot36 2.17 capture](https://github.com/xdsopl/robot36/blob/v2.17/app/src/main/java/xdsopl/robot36/MainActivity.java#L275) [Android playback capture](https://developer.android.com/media/platform/av-capture)
+
+## Backlog
+
+- Give the app's dummy rig receive audio that follows CAT tuning. Stream
+  static on most frequencies, and play short, prerecorded test signals at
+  documented dial frequencies for common modes. Start with an SSTV clip at
+  14.230 MHz over the existing 48 kHz mono PCM16 stream. Use bundled
+  recordings with permission to redistribute them. The owner can supply
+  recordings if needed. Keep encoding out of the app. Verify that a client
+  can tune from static to the clip, decode it, and tune back to static
+  without a radio attached.
 
 ## Working style
 
