@@ -116,13 +116,14 @@ A host JNI smoke test checked exact PCM through two consecutive RX sessions
 with a separate CAT connection open. Pixel decode with the FX-4CR and
 physical verification of the (tr)uSDX remain pending.
 
-The host `dummy-tx-loopback` test is the first transmit milestone. It uses the
-pinned Hamlib network client with 48 kHz mono PCM16 to round-trip samples
-through the dummy backend with PTT blocked. For the next client step, use the
-existing JS8Android TX audio callback with a 48 kHz output configuration and
-a bounded network writer. Qualify the server's actual output route, shared
-TX/PTT ownership, normal drain, and abort on failure before enabling physical
-TX. See [the software-only test commands](README.md#verification-status).
+The host `dummy-tx-loopback` test uses the pinned Hamlib network client with
+48 kHz mono PCM16 and PTT blocked. The JS8Android host harness round-tripped
+189,681 unchanged signal samples from a complete Turbo frame and decoded
+`HELLO-WORLD-`. The same branch has an opt-in Android instrumentation test
+that takes PCM from JS8Android's TX callback. Its APK and the standalone
+ARM64 dummy server built. The on-device test remains pending. Qualify the
+physical output route, shared TX/PTT ownership, normal drain and abort on
+failure before enabling TX for a radio. See [the software-only test commands](README.md#verification-status).
 
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
@@ -142,6 +143,12 @@ For Robot36, add a rigctld source alongside its existing audio sources. The deve
   recordings if needed. Keep encoding out of the app. Verify that a client
   can tune from static to the clip, decode it, and tune back to static
   without a radio attached.
+- Add dummy-rig echo frequencies. Buffer incoming TX audio while tuned to an
+  echo frequency. After about two seconds of silence, play it back over RX.
+  Offer a clean echo and a couple of frequencies with increasing noise so
+  modem clients can check their decoders at different signal levels. Keep
+  echo playback deterministic for repeatable tests and cap the buffer so
+  continuous input cannot grow it indefinitely.
 
 ## Working style
 

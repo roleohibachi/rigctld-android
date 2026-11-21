@@ -61,6 +61,14 @@ if(ANDROID)
     target_link_libraries(android_rigctld PRIVATE rigctld_core log)
     target_link_options(android_rigctld PRIVATE
         "-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
+    # Built explicitly for same-device instrumentation. No APK packages this executable.
+    add_executable(rigctld-dummy-test-server EXCLUDE_FROM_ALL
+        host_main.cpp
+        transport/trusdx_rx.cpp
+        transport/usb_serial_bridge_jni.cpp
+        transport/bluetooth_serial_bridge_jni.cpp)
+    target_include_directories(rigctld-dummy-test-server PRIVATE "${CMAKE_CURRENT_LIST_DIR}")
+    target_link_libraries(rigctld-dummy-test-server PRIVATE rigctld_core log)
 else()
     add_executable(rigctld-host host_main.cpp)
     target_link_libraries(rigctld-host PRIVATE rigctld_core)

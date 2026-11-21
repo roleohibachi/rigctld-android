@@ -39,7 +39,18 @@ build environment:
 ```
 
 The test client also accepts a nonsilent, 960-byte raw S16LE file as its second
-argument. This mode is available in the host test runner only.
+argument. The normal Android app keeps audio transmit disabled. To serve
+the same dummy loopback to Android instrumentation on an ARM64 device:
+
+```bash
+bash scripts/docker-build.sh dummy-server
+adb push .work/native-dummy-android/rigctld-dummy-test-server /data/local/tmp/
+adb shell chmod 755 /data/local/tmp/rigctld-dummy-test-server
+adb shell /data/local/tmp/rigctld-dummy-test-server 14532 dummy-tx-loopback
+```
+
+Keep the last command running while the Android client test runs. Both TCP
+and UDP stay on the test device's loopback interface.
 
 On the Pixel 8a, build `df54398` streamed FX-4CR C-Media audio to the pinned Hamlib `rigstreamtest` client on loopback. During a five-second 48 kHz mono float32 receive test, the client reported 915,396 bytes, nonzero levels and zero gaps, overruns and underruns. A concurrent CAT frequency query returned 7,046,700 Hz. A second client connection opened native PCM16 and reported 255,728 bytes with zero gaps over three seconds. The pinned diagnostic client logs a warning when it parses the extended `stream_caps:` response header and uses float32 to display levels even for PCM16. Measure levels in its default float32 mode. USB reconnect and JS8Android decoding through the stream are still pending.
 

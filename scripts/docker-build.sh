@@ -11,6 +11,16 @@ case "${1:-apk}" in
         target=android
         command='bash scripts/build-hamlib.sh android-arm64 && bash scripts/build-ggmorse.sh'
         ;;
+    dummy-server)
+        target=android
+        command='bash scripts/build-hamlib.sh android-arm64 &&
+            sdk_cmake="$ANDROID_HOME/cmake/3.22.1/bin/cmake" &&
+            ndk="${ANDROID_NDK_ROOT:-$ANDROID_HOME/ndk/27.2.12479018}" &&
+            "$sdk_cmake" -S native -B .work/native-dummy-android \
+                -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+                -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-31 -DCMAKE_BUILD_TYPE=Release &&
+            "$sdk_cmake" --build .work/native-dummy-android --target rigctld-dummy-test-server --parallel 4'
+        ;;
     test)
         target=native
         command='bash scripts/build-hamlib.sh host &&
@@ -20,7 +30,7 @@ case "${1:-apk}" in
             read -r revision < native/hamlib-version &&
             python3 tests/test_rigctld.py .work/native/rigctld-host "${HAMLIB_WORK_DIR:-.work/hamlib/$revision}/build-host/tests/rigctl" -v'
         ;;
-    *) echo "Usage: $0 [apk|ggmorse|test]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [apk|ggmorse|dummy-server|test]" >&2; exit 2 ;;
 esac
 
 image="rigctld-$target-build"
