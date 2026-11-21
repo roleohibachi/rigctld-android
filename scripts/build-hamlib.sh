@@ -3,7 +3,7 @@ set -euo pipefail
 
 root_dir=$(cd "$(dirname "$0")/.." && pwd)
 read -r revision < "$root_dir/native/hamlib-version"
-work_dir="${HAMLIB_WORK_DIR:-$root_dir/.work/hamlib}"
+work_dir="${HAMLIB_WORK_DIR:-$root_dir/.work/hamlib/$revision}"
 source_dir="$work_dir/source"
 build_dir="$work_dir/build-${1:-host}"
 jobs="${BUILD_JOBS:-4}"
@@ -37,11 +37,10 @@ if [[ "$(git -C "$source_dir" rev-parse HEAD)" != "$revision" ]]; then
 fi
 
 for patch in "$root_dir"/native/hamlib-patches/*.patch; do
-    if git -C "$source_dir" apply --check --ignore-space-change --unidiff-zero --recount "$patch" 2>/dev/null; then
-        git -C "$source_dir" apply --ignore-space-change --unidiff-zero --recount "$patch"
-    else
-        git -C "$source_dir" apply --reverse --check --ignore-space-change --unidiff-zero --recount "$patch"
+    if git -C "$source_dir" apply --reverse --check --ignore-space-change --unidiff-zero --recount "$patch" 2>/dev/null; then
+        continue
     fi
+    git -C "$source_dir" apply --ignore-space-change --unidiff-zero --recount "$patch"
 done
 
 if [[ ! -x "$source_dir/configure" ]]; then

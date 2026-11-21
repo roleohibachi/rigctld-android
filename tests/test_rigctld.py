@@ -1,6 +1,7 @@
 """Smoke-test the embedded server against the pinned Hamlib rigctl client."""
 
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -11,6 +12,9 @@ from select import select
 
 SERVER, CLIENT = map(lambda name: Path(name).resolve(), sys.argv[1:3])
 del sys.argv[1:3]
+
+# Hamlib v1 streaming header. Header fields are network-endian, PCM is little-endian.
+STREAM_HEADER = struct.Struct("!BBHIIQIBBHHH")
 
 
 class RigctldTests(unittest.TestCase):
@@ -105,6 +109,76 @@ class RigctldTests(unittest.TestCase):
                 self.assertRegex(reply.readline(), rb"^RPRT -[0-9]+\n$")
             connection.sendall(b"f\n")
             self.assertTrue(reply.readline().strip().isdigit())
+
+    def test_dummy_receive_stream_with_concurrent_cat(self):
+        with self.connect() as cat, cat.makefile("rb") as cat_reply:
+            with self.connect() as owner, owner.makefile("rb") as reply, socket.socket(
+                socket.AF_INET, socket.SOCK_DGRAM
+            ) as audio:
+                for args in (b"AUDIO_TX PCM_S16 48000", b"AUDIO_RX PCM_S16 48000 multicast=239.1.2.3:40000"):
+                    owner.sendall(b"+\\stream_open " + args + b"\n")
+                    self.assertTrue(reply.readline().startswith(b"stream_open:"))
+                    self.assertRegex(reply.readline(), rb"^RPRT -[0-9]+\n$")
+
+                owner.sendall(b"+\\stream_open AUDIO_RX PCM_S16 48000 channels=1\n")
+                self.assertTrue(reply.readline().startswith(b"stream_open:"))
+                fields = {}
+                while True:
+                    line = reply.readline()
+                    if line.startswith(b"RPRT"):
+                        self.assertEqual(line, b"RPRT 0\n")
+                        break
+                    key, value = line.strip().split(b": ", 1)
+                    fields[key] = value
+                stream_id = int(fields[b"stream_id"])
+                token = int(fields[b"subscribe_token"])
+                port = int(fields[b"udp_port"])
+                with open("/proc/net/udp") as udp_sockets:
+                    matching = [line.split()[1] for line in udp_sockets if f":{port:04X} " in line]
+                self.assertIn(f"0100007F:{port:04X}", matching)
+                self.assertNotIn(f"00000000:{port:04X}", matching)
+
+                audio.settimeout(2)
+                audio.connect(("127.0.0.1", port))
+                audio.send(STREAM_HEADER.pack(1, 0, stream_id, token, 0, 0, 48000, 2, 1, 0, 4, 0))
+                ack = STREAM_HEADER.unpack(audio.recv(2048))
+                self.assertEqual(ack[:4], (1, 0, stream_id, token))
+                self.assertEqual(ack[-2:], (8, 0))
+
+                cat.sendall(b"f\n")
+                self.assertTrue(cat_reply.readline().strip().isdigit())
+                status_command = f"+\\stream_status {stream_id}\n".encode()
+                cat.sendall(status_command)
+                self.assertTrue(cat_reply.readline().startswith(b"stream_status:"))
+                self.assertRegex(cat_reply.readline(), rb"^RPRT -[0-9]+\n$")
+
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    data = audio.recv(2048)
+                    header = STREAM_HEADER.unpack_from(data)
+                    control, length = header[-2:]
+                    if control not in (0, 0x20):
+                        continue
+                    self.assertEqual(header[:4], (1, 0, stream_id, token))
+                    self.assertEqual(header[6:9], (48000, 2, 1))
+                    self.assertEqual(len(data), STREAM_HEADER.size + length)
+                    pcm = data[STREAM_HEADER.size + (20 if control else 0):]
+                    if any(pcm):
+                        break
+                else:
+                    self.fail("No nonzero PCM arrived from the dummy backend")
+
+            # A client reconnects with a clean session and never inherits its predecessor's stream.
+            with self.connect() as new_owner, new_owner.makefile("rb") as new_reply:
+                new_owner.sendall(b"+\\stream_list\n")
+                self.assertTrue(new_reply.readline().startswith(b"stream_list:"))
+                listing = []
+                for line in new_reply:
+                    if line.startswith(b"RPRT"):
+                        self.assertEqual(line, b"RPRT 0\n")
+                        break
+                    listing.append(line)
+                self.assertNotIn(f"stream_id: {stream_id}\n".encode(), listing)
 
     def test_radio_policy_blocks_ptt_by_default_and_keeps_cat_available(self):
         self.restart_with_policy("receive-only")

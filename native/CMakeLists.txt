@@ -3,7 +3,14 @@ project(android_rigctld LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(HAMLIB_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.work/hamlib" CACHE PATH "Prepared Hamlib tree")
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/hamlib-version" HAMLIB_REVISION LIMIT_COUNT 1)
+set(HAMLIB_ROOT "" CACHE PATH "Override the prepared Hamlib tree")
+set(HAMLIB_CACHE "${CMAKE_CURRENT_LIST_DIR}/../.work/hamlib")
+if(DEFINED ENV{HAMLIB_WORK_DIR} AND NOT "$ENV{HAMLIB_WORK_DIR}" STREQUAL "")
+    set(HAMLIB_ROOT "$ENV{HAMLIB_WORK_DIR}")
+elseif(NOT HAMLIB_ROOT OR HAMLIB_ROOT STREQUAL HAMLIB_CACHE)
+    set(HAMLIB_ROOT "${HAMLIB_CACHE}/${HAMLIB_REVISION}")
+endif()
 set(HAMLIB_SOURCE "${HAMLIB_ROOT}/source")
 if(ANDROID)
     set(HAMLIB_BUILD "${HAMLIB_ROOT}/build-android-arm64")
@@ -18,7 +25,11 @@ endif()
 find_package(Threads REQUIRED)
 add_library(rigctld_core STATIC
     server.cpp
+    embedded_stream.c
     "${HAMLIB_SOURCE}/tests/rigctl_parse.c"
+    "${HAMLIB_SOURCE}/tests/rigctld_stream.c"
+    "${HAMLIB_SOURCE}/tests/rigctld_client.c"
+    "${HAMLIB_SOURCE}/tests/daemon_client.c"
     "${HAMLIB_SOURCE}/tests/dumpcaps.c"
     "${HAMLIB_SOURCE}/tests/dumpstate.c"
     "${HAMLIB_SOURCE}/tests/rig_tests.c")

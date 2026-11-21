@@ -1,10 +1,8 @@
 diff --git a/src/Makefile.am b/src/Makefile.am
-index 766fd95b9..100530c1f 100644
+index 5d40b7e8e..f86a51339 100644
 --- a/src/Makefile.am
 +++ b/src/Makefile.am
-@@ -5,3 +5,3 @@
- DISTCLEANFILES = hamlibdatetime.h
- 
+@@ -11 +11 @@ CLEANFILES = libhamlib.def
 -RIGSRC = hamlibdatetime.h rig.c serial.c serial.h misc.c misc.h register.c register.h event.c \
 +RIGSRC = hamlibdatetime.h rig.c serial.c serial.h android_serial_bridge.c android_serial_bridge.h misc.c misc.h register.c register.h event.c \
 diff --git a/src/android_serial_bridge.c b/src/android_serial_bridge.c

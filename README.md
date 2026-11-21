@@ -1,6 +1,6 @@
 # Android rigctld
 
-Android rigctld provides a local CAT service over USB serial or classic Bluetooth RFCOMM. Use the Hamlib dummy rig to check the service and protocol without connecting a radio. Shared USB and Bluetooth audio are planned for a later phase.
+Android rigctld provides a local CAT service over USB serial or classic Bluetooth RFCOMM. Use the Hamlib dummy rig to check CAT and the receive streaming protocol without connecting a radio. Shared audio from physical radios is planned for a later phase.
 
 ## Verification status
 
@@ -21,6 +21,8 @@ On the same USB setup, the owner reported a gray waterfall in Robot36 2.17 (67) 
 JS8Android also showed a blank waterfall on the Pixel. ADB matched its unsilenced capture to the QCC3024, and all 23 logged sample triplets were zero. On a Linux PC the same FX-4CR connection enumerated two audio inputs, the QCC3024 (`0a12:4007`) and the C-Media USB PnP Sound Device (`0d8c:013c`). `arecord -D hw:CARD=QCC3024,DEV=0 -f S16_LE -r 48000 -c 2 -d 4 -t raw /dev/null` failed with an I/O error and zero frames on two attempts. Using `hw:CARD=Device,DEV=0`, `-c 1` and `-d 8` captured 384,000 frames with a peak of 7,187 and RMS of 1,542 in signed 16-bit units.
 
 The owner confirmed that the USB audio diagnostics picker from `5a5cda7` lists both FX-4CR inputs on the Pixel 8a. With the direct USB monitor from `fd0c54a`, the owner reported frames from C-Media, none from QCC3024, and level changes when adjusting the rig's AUX output. Continuous capture with simultaneous CAT, recovery after reconnect, and client decoding through the service are still pending.
+
+The Docker host suite verifies that the embedded dummy rig negotiates 48 kHz mono PCM16, sends nonzero samples over IPv4 loopback UDP, and answers CAT on a second TCP connection. It covers stream ownership, disconnect cleanup, and rejection of transmit and multicast streams. To run this check, use `bash scripts/docker-build.sh test`. The Android APK includes the same embedded daemon. On-device streaming and the JS8Android client adapter remain to be verified.
 
 ## Build and test with Docker
 
@@ -69,7 +71,7 @@ The listener binds to loopback. Other Android apps can connect locally. Physical
 
 The APK links the pinned Hamlib library and upstream rigctld command parser into one JNI library. The app owns the socket and service lifecycle. The host smoke tests use the same server and parser with a real Hamlib `rigctl` client. They check CAT reads and writes, simulated PTT and connection ownership, concurrent clients, stop, restart and port conflicts.
 
-Hamlib is pinned at `1b2461aba99f0dde0531e1732c00e60aeee40657`. The Android serial patches and USB/Bluetooth bridge code come from JS8Android commit `1abc75d9ca23096ead784f827ae0b87a712f861b`. The embedded parser preserves Hamlib’s protocol and rejects CLI commands that can exit or stall the app process. The audit’s local reference links assume a separate JS8Android checkout in `Android-port/`. See [patches](native/hamlib-patches/) and the [audit](AUDIT.md).
+Hamlib is pinned at `af198ace7697c84f5d8ce084271208e383012792`. Builds keep sources and output under `.work/hamlib/<revision>/`. The Android serial patches and USB/Bluetooth bridge code come from JS8Android commit `1abc75d9ca23096ead784f827ae0b87a712f861b`. The embedded parser preserves Hamlib’s protocol and rejects CLI commands that can exit or stall the app process. The audit’s local reference links assume a separate JS8Android checkout in `Android-port/`. See [patches](native/hamlib-patches/) and the [audit](AUDIT.md).
 
 Application source is GPL-3.0-or-later. The APK bundles the relevant Hamlib and GPL license texts. The build script identifies and fetches the exact Hamlib source and applies the included patches. [Project license](LICENSE)
 

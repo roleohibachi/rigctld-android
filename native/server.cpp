@@ -21,7 +21,12 @@ extern "C" {
 
 // The CLI and the shared parser use these globals from libhamlib.
 extern int lock_mode;
+extern int is_rigctld;
 extern powerstat_t rig_powerstat;
+int embedded_stream_start(void);
+void embedded_stream_set_client(int client_id);
+void embedded_stream_close_client(int client_id);
+void embedded_stream_stop(void);
 }
 
 namespace {
@@ -97,6 +102,7 @@ bool parse_command(RIG* rig, Client& client, RadioControl& control) {
     if (!output) return false;
     CommandContext context{control, client};
     current_command = &context;
+    embedded_stream_set_client(client.socket.get());
     const int result = rigctl_parse(
         rig, input.get(), output, nullptr, 0, nullptr, 1, 0, &client.vfo_mode,
         '\r', &client.extended_response, &client.response_separator, 0);
@@ -151,6 +157,9 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
     if (name == "halt" || name == "pause" || name == "test") return -RIG_EACCESS;
     if (current_command == nullptr) return -RIG_EINTERNAL;
     auto& [control, client] = *current_command;
+    if (name.substr(0, 7) == "stream_") {
+        return control.radio.model == RIG_MODEL_DUMMY && control.radio.path.empty() ? RIG_OK : -RIG_ENAVAIL;
+    }
     if (control.radio.path.empty() && !control.radio.enforce_radio_policy) return RIG_OK;
 
     // Physical radios expose the CAT operations modem clients need. Raw CAT,
@@ -212,6 +221,7 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
     }
 
     lock_mode = 0;
+    is_rigctld = 1;
     rig_powerstat = RIG_POWER_ON;
     std::unique_ptr<RIG, decltype(&rig_cleanup)> rig(rig_init(radio.model), rig_cleanup);
     if (!rig) return "Unknown Hamlib model " + std::to_string(radio.model);
@@ -232,8 +242,10 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
     std::string error;
     if (listen(listener.get(), static_cast<int>(max_clients)) != 0) {
         error = system_error("Listen on CAT socket");
-    } else if (!stopping_) {
-        on_listening();
+    } else if (embedded_stream_start() != 0) {
+        error = "Initialize Hamlib streaming";
+    } else {
+        if (!stopping_) on_listening();
         std::array<Client, max_clients> clients;
         std::array<pollfd, max_clients + 1> descriptors{};
         RadioControl control{radio};
@@ -274,6 +286,7 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
                         error = "Client disconnected. Unable to confirm PTT release";
                         stopping_ = true;
                     }
+                    embedded_stream_close_client(client.socket.get());
                     client.disconnect();
                 }
             }
@@ -292,6 +305,7 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
             }
         }
         if (control.release(rig.get()) != RIG_OK) error = "Unable to confirm PTT release";
+        embedded_stream_stop();
     }
     rig_close(rig.get());
     return error;

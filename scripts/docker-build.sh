@@ -12,7 +12,8 @@ case "${1:-apk}" in
         command='bash scripts/build-hamlib.sh host &&
             cmake -S native -B .work/native -DCMAKE_BUILD_TYPE=Debug &&
             cmake --build .work/native -j4 &&
-            python3 tests/test_rigctld.py .work/native/rigctld-host .work/hamlib/build-host/tests/rigctl -v'
+            read -r revision < native/hamlib-version &&
+            python3 tests/test_rigctld.py .work/native/rigctld-host "${HAMLIB_WORK_DIR:-.work/hamlib/$revision}/build-host/tests/rigctl" -v'
         ;;
     *) echo "Usage: $0 [apk|test]" >&2; exit 2 ;;
 esac
