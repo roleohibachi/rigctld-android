@@ -20,9 +20,11 @@ On the same USB setup, the owner reported a gray waterfall in Robot36 2.17 (67) 
 
 JS8Android also showed a blank waterfall on the Pixel. ADB matched its unsilenced capture to the QCC3024, and all 23 logged sample triplets were zero. On a Linux PC the same FX-4CR connection enumerated two audio inputs, the QCC3024 (`0a12:4007`) and the C-Media USB PnP Sound Device (`0d8c:013c`). `arecord -D hw:CARD=QCC3024,DEV=0 -f S16_LE -r 48000 -c 2 -d 4 -t raw /dev/null` failed with an I/O error and zero frames on two attempts. Using `hw:CARD=Device,DEV=0`, `-c 1` and `-d 8` captured 384,000 frames with a peak of 7,187 and RMS of 1,542 in signed 16-bit units.
 
-The owner confirmed that the USB audio diagnostics picker from `5a5cda7` lists both FX-4CR inputs on the Pixel 8a. With the direct USB monitor from `fd0c54a`, the owner reported frames from C-Media, none from QCC3024, and level changes when adjusting the rig's AUX output. Continuous capture with simultaneous CAT, recovery after reconnect, and client decoding through the service are still pending.
+The owner confirmed that the USB audio diagnostics picker from `5a5cda7` lists both FX-4CR inputs on the Pixel 8a. With the direct USB monitor from `fd0c54a`, the owner reported frames from C-Media, none from QCC3024, and level changes when adjusting the rig's AUX output.
 
 The Docker host suite verifies 48 kHz mono PCM16 over IPv4 loopback UDP from the embedded dummy rig and from a per-session provider fed a known sample pattern. Both answer CAT on a second TCP connection. The tests also cover stream ownership, disconnect cleanup, and rejection of transmit and multicast streams. Run them with `bash scripts/docker-build.sh test`.
+
+On the Pixel 8a, build `df54398` streamed FX-4CR C-Media audio to the pinned Hamlib `rigstreamtest` client on loopback. During a five-second 48 kHz mono float32 receive test, the client reported 915,396 bytes, nonzero levels and zero gaps, overruns and underruns. A concurrent CAT frequency query returned 7,046,700 Hz. A second client connection opened native PCM16 and reported 255,728 bytes with zero gaps over three seconds. The pinned diagnostic client logs a warning when it parses the extended `stream_caps:` response header and uses float32 to display levels even for PCM16. Measure levels in its default float32 mode. USB reconnect and JS8Android decoding through the stream are still pending.
 
 ## Build and test with Docker
 
