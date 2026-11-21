@@ -27,8 +27,8 @@ int main(int argc, char** argv) {
     }
     const std::string_view policy = argc == 3 ? argv[2] : "";
     if (port == 0 || argc > 3 || (argc == 3 && policy != "receive-only" && policy != "ptt"
-                                 && policy != "audio-fixture")) {
-        std::cerr << "Usage: rigctld-host [port [receive-only|ptt|audio-fixture]]\n";
+                                 && policy != "audio-fixture" && policy != "dummy-tx-loopback")) {
+        std::cerr << "Usage: rigctld-host [port [receive-only|ptt|audio-fixture|dummy-tx-loopback]]\n";
         return 2;
     }
     std::signal(SIGINT, stop);
@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
     radio.enforce_radio_policy = !policy.empty();
     radio.allow_ptt = policy == "ptt";
     radio.usb_audio_rx = policy == "audio-fixture";
+    radio.dummy_tx_loopback = policy == "dummy-tx-loopback";
     std::atomic<bool> finished{false};
     std::thread producer;
     if (radio.usb_audio_rx) {

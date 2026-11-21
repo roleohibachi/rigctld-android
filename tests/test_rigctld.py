@@ -113,6 +113,17 @@ class RigctldTests(unittest.TestCase):
     def test_dummy_receive_stream_with_concurrent_cat(self):
         self.check_receive_stream_with_cat()
 
+    def test_opt_in_dummy_tx_audio_round_trips_without_ptt(self):
+        self.restart_with_policy("dummy-tx-loopback")
+        subprocess.run(
+            [SERVER.with_name("test-dummy-tx-loopback"), f"127.0.0.1:{self.port}"],
+            check=True, timeout=10,
+        )
+        with self.connect() as cat, cat.makefile("rb") as reply:
+            cat.sendall(b"T 1\nt\n")
+            self.assertRegex(reply.readline(), rb"^RPRT -[0-9]+\n$")
+            self.assertEqual(reply.readline(), b"0\n")
+
     def test_session_audio_provider_with_concurrent_cat(self):
         self.restart_with_policy("audio-fixture")
         self.check_receive_stream_with_cat(sample=1234)

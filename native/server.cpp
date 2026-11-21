@@ -145,11 +145,20 @@ std::string system_error(const std::string& action) {
     return action + ": " + std::strerror(error);
 }
 
-int configure_serial(RIG* rig, const char* key, const std::string& value) {
+int configure_rig(RIG* rig, const char* key, const std::string& value) {
     if (value.empty()) return RIG_OK;
     const token_t token = rig_token_lookup(rig, key);
     return token == RIG_CONF_END ? -RIG_EINVAL : rig_set_conf(rig, token, value.c_str());
 }
+
+bool dummy_tx_loopback(const RigctldServer::Radio& radio) {
+    return radio.dummy_tx_loopback && radio.model == RIG_MODEL_DUMMY
+        && radio.path.empty() && !radio.usb_audio_rx;
+}
+}
+
+extern "C" int rigctld_embedded_allow_audio_tx(void) {
+    return current_command != nullptr && dummy_tx_loopback(current_command->control.radio);
 }
 
 extern "C" int rigctld_embedded_authorize(const char* command, const char* argument, vfo_t vfo) {
@@ -233,9 +242,13 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
             std::pair{"serial_speed", &radio.baud},
             std::pair{"serial_handshake", &radio.handshake}
         }) {
-            const int result = configure_serial(rig.get(), key, *value);
+            const int result = configure_rig(rig.get(), key, *value);
             if (result != RIG_OK) return std::string(key) + ": " + rigerror(result);
         }
+    }
+    if (dummy_tx_loopback(radio)) {
+        const int result = configure_rig(rig.get(), "stream_mode", "loopback");
+        if (result != RIG_OK) return std::string("Configure dummy audio loopback: ") + rigerror(result);
     }
     const int open_status = rig_open(rig.get());
     if (open_status != RIG_OK) return std::string("Open Hamlib rig: ") + rigerror(open_status);

@@ -116,6 +116,14 @@ A host JNI smoke test checked exact PCM through two consecutive RX sessions
 with a separate CAT connection open. Pixel decode with the FX-4CR and
 physical verification of the (tr)uSDX remain pending.
 
+The host `dummy-tx-loopback` test is the first transmit milestone. It uses the
+pinned Hamlib network client with 48 kHz mono PCM16 to round-trip samples
+through the dummy backend with PTT blocked. For the next client step, use the
+existing JS8Android TX audio callback with a 48 kHz output configuration and
+a bounded network writer. Qualify the server's actual output route, shared
+TX/PTT ownership, normal drain, and abort on failure before enabling physical
+TX. See [the software-only test commands](README.md#verification-status).
+
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
 Use stock [GGMorse](https://play.google.com/store/apps/details?id=com.ggerganov.GGMorse) to test apps that use the default recording input. On the Pixel 8a, connect the FX-4CR over USB, leave Android rigctld in CAT-only mode with PTT disabled, and close other audio capture apps. Tune to readable CW and open GGMorse with microphone permission. While it decodes, use `adb shell dumpsys media.audio_policy` and `adb shell dumpsys audio` to check the active recording route. Count this as verified only if GGMorse decodes CW and the active input is the rig's USB audio device. Record the Android build, app version, and route. Repeat with Bluetooth once its audio profile is known.

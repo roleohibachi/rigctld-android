@@ -17,6 +17,7 @@ public:
         bool allow_ptt = false;
         bool enforce_radio_policy = false;
         bool usb_audio_rx = false;
+        bool dummy_tx_loopback = false;
     };
 
     RigctldServer();

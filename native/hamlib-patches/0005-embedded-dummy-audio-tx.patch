@@ -1,0 +1,35 @@
+diff --git a/tests/rigctl_parse.c b/tests/rigctl_parse.c
+--- a/tests/rigctl_parse.c
++++ b/tests/rigctl_parse.c
+@@ -128,4 +128,8 @@
+ pthread_key_t thread_data_key;
+
++
++#ifdef HAMLIB_EMBEDDED_RIGCTLD
++extern int rigctld_embedded_allow_audio_tx(void);
++#endif
+
+ /* variables for readline support */
+@@ -7184,4 +7188,13 @@
+
+ #ifdef HAMLIB_EMBEDDED_RIGCTLD
++    /* The host dummy loopback permits unicast audio TX. */
++    if (!opts.multicast_spec && cfg.type == RIG_STREAM_TYPE_AUDIO_TX
++            && rigctld_embedded_allow_audio_tx())
++    {
++        goto stream_options_validated;
++    }
++#endif
++
++#ifdef HAMLIB_EMBEDDED_RIGCTLD
+     if (opts.multicast_spec || cfg.type != RIG_STREAM_TYPE_AUDIO_RX)
+     {
+@@ -7201,4 +7214,8 @@
+         RETURNFUNC2(-RIG_EINVAL);
+     }
++
++#ifdef HAMLIB_EMBEDDED_RIGCTLD
++stream_options_validated:
++#endif
+
+     /* Allocate stream_id */
