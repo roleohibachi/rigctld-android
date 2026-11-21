@@ -17,6 +17,8 @@ import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -157,6 +159,11 @@ public final class MainActivity extends Activity {
         diagnostics.setOnClickListener(view -> copyDiagnostics());
         content.addView(diagnostics);
         addUsbAudioPicker(content);
+        rigModel.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable text) { render(); }
+        });
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
         setContentView(scroll);
@@ -203,7 +210,7 @@ public final class MainActivity extends Activity {
         ports.setEnabled(ready);
         refresh.setEnabled(ready);
         allowPtt.setEnabled(ready && (transport.getSelectedItemPosition() != RadioSelection.USB || !shareAudio.isChecked()));
-        rtsCts.setEnabled(ready);
+        rtsCts.setEnabled(ready && !(isTruSdxUsb() && shareAudio.isChecked()));
         rigModel.setEnabled(ready);
         baud.setEnabled(ready);
         renderAudioMonitor();
@@ -299,10 +306,17 @@ public final class MainActivity extends Activity {
         monitorAudio.setEnabled(running ? !monitorCancelled.get()
             : available && UsbAudioMonitor.supports(selectedAudioDevice()));
         boolean usbSelected = transport.getSelectedItemPosition() == RadioSelection.USB;
+        boolean trusdx = isTruSdxUsb();
+        shareAudio.setText(trusdx ? "Share (tr)uSDX serial audio (receive only)" : "Share selected USB audio (receive only)");
         shareAudio.setVisibility(usbSelected ? View.VISIBLE : View.GONE);
         shareAudio.setEnabled(available && !state.active && awaitingUsbPermission == null);
-        receivePlayback.setVisibility(usbSelected && shareAudio.isChecked() ? View.VISIBLE : View.GONE);
+        receivePlayback.setVisibility(usbSelected && !trusdx && shareAudio.isChecked() ? View.VISIBLE : View.GONE);
         receivePlayback.setEnabled(shareAudio.isEnabled());
+    }
+
+    private boolean isTruSdxUsb() {
+        return transport.getSelectedItemPosition() == RadioSelection.USB
+            && Integer.toString(RadioSelection.TRUSDX_MODEL).equals(rigModel.getText().toString());
     }
 
     private void requestAudioMonitor() {
@@ -482,17 +496,27 @@ public final class MainActivity extends Activity {
             }
         }
         String audioPath = null;
+        boolean trusdxAudio = choice == RadioSelection.USB && model == RadioSelection.TRUSDX_MODEL && shareAudio.isChecked();
         if (choice == RadioSelection.USB && shareAudio.isChecked()) {
-            UsbDevice audio = selectedAudioDevice();
-            if (!UsbAudioMonitor.supportsRxStream(audio)) {
-                selectionMessage.setText("Select the C-Media (0d8c:013c) USB input to share receive audio.");
-                return;
+            if (trusdxAudio) {
+                if (!rate.isEmpty() && Integer.parseInt(rate) != 115200) {
+                    baud.setError("Use 115200 baud for (tr)uSDX serial audio");
+                    return;
+                }
+                rate = "115200";
+            } else {
+                UsbDevice audio = selectedAudioDevice();
+                if (!UsbAudioMonitor.supportsRxStream(audio)) {
+                    selectionMessage.setText("Select the C-Media (0d8c:013c) USB input to share receive audio.");
+                    return;
+                }
+                audioPath = audio.getDeviceName();
             }
-            audioPath = audio.getDeviceName();
         }
         RadioSelection selection = new RadioSelection(choice, model, port.path, rate,
-            choice == RadioSelection.USB && rtsCts.isChecked(), audioPath == null && allowPtt.isChecked(),
-            audioPath, audioPath != null && receivePlayback.isChecked());
+            choice == RadioSelection.USB && rtsCts.isChecked() && !trusdxAudio,
+            audioPath == null && !trusdxAudio && allowPtt.isChecked(),
+            audioPath, audioPath != null && receivePlayback.isChecked(), trusdxAudio);
         if (selection.allowPtt) {
             new AlertDialog.Builder(this).setTitle("Allow PTT for this session?")
                 .setMessage("Local rigctld clients can key the radio. For testing, connect a dummy load and select low power.")

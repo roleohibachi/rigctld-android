@@ -59,6 +59,12 @@ Run `bash scripts/docker-build.sh ggmorse` to build the separate **GGMorse Rigct
 
 Start rigctld with **Share selected USB audio (receive only)** enabled. Tune to a readable CW signal at an audio pitch within GGMorse's detection range of 200–1,200 Hz. Open **GGMorse Rigctld**, tap **Connect**, and check for signal level and decoded text. The client opens 48 kHz mono PCM16 at `127.0.0.1:4532` and releases its receive stream on disconnect or when the app leaves the foreground. This is a separate receive-only app built with the public GGMorse library and can coexist with the Play Store app. [GGMorse source](https://github.com/ggerganov/ggmorse)
 
+### (tr)uSDX serial receive audio
+
+Connect the (tr)uSDX by USB and close any app that owns its serial port. Select **USB serial**, Hamlib model **2055**, the rig's serial port, and **115200** baud. Leave **USB RTS/CTS** and **CAT PTT** off. For a first check, start with audio sharing off and read the dial frequency and mode using the CAT commands below. Record the firmware version and compare the replies with the rig's display.
+
+Stop the service, enable **Share (tr)uSDX serial audio (receive only)**, and start again. This option uses the selected CAT port for the serial audio protocol. Wait for **(tr)uSDX serial receive ready**, then connect GGMorse Rigctld to the usual same-phone endpoint. Tune to CW, check for signal levels and decoded text, and read CAT frequency and mode again during audio. Stop and restart once, then unplug/replug and select the port again. If the status reports missing or stalled audio, copy diagnostics and note whether CAT still responds. The first build uses the documented 7,825 Hz receive rate and converts unsigned PCM to the same 48 kHz mono PCM16 stream the FX-4CR uses. The host tests verify framing and sample conversion. The radio's timing, simultaneous CAT/audio and recovery still need hardware verification. [Radio protocol documentation](https://dl2man.de/5-trusdx-details/)
+
 ## Verify on a phone
 
 Use ADB and a desktop Hamlib installation on a machine that can reach the phone. Install the APK, open Android rigctld, select **Dummy rig** and tap **Start**. With the screen showing **Listening on 127.0.0.1:4532**, run:

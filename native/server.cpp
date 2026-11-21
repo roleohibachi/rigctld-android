@@ -252,7 +252,16 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
         std::array<Client, max_clients> clients;
         std::array<pollfd, max_clients + 1> descriptors{};
         RadioControl control{radio};
+        auto next_audio_poll = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (!stopping_) {
+            if (radio.model == RIG_MODEL_TRUSDX && radio.usb_audio_rx
+                && std::chrono::steady_clock::now() >= next_audio_poll) {
+                // (tr)uSDX clients periodically query frequency while receiving.
+                // Run through Hamlib on the CAT worker so replies have one owner.
+                freq_t frequency;
+                rig_get_freq(rig.get(), RIG_VFO_CURR, &frequency);
+                next_audio_poll = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            }
             if (control.ptt_owner && std::chrono::steady_clock::now() >= control.ptt_deadline) {
                 if (control.release(rig.get()) != RIG_OK) {
                     error = "PTT timeout. Unable to confirm release";

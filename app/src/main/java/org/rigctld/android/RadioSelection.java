@@ -7,6 +7,7 @@ final class RadioSelection {
     static final int DUMMY = 0;
     static final int USB = 1;
     static final int BLUETOOTH = 2;
+    static final int TRUSDX_MODEL = 2055;
 
     final int transport;
     final int model;
@@ -16,13 +17,14 @@ final class RadioSelection {
     final boolean allowPtt;
     final String usbAudioPath;
     final boolean receivePlayback;
+    final boolean trusdxAudio;
 
     RadioSelection(int transport, int model, String path, String baud, boolean rtsCts, boolean allowPtt) {
-        this(transport, model, path, baud, rtsCts, allowPtt, null, false);
+        this(transport, model, path, baud, rtsCts, allowPtt, null, false, false);
     }
 
     RadioSelection(int transport, int model, String path, String baud, boolean rtsCts, boolean allowPtt,
-                   String usbAudioPath, boolean receivePlayback) {
+                   String usbAudioPath, boolean receivePlayback, boolean trusdxAudio) {
         this.transport = transport;
         this.model = model;
         this.path = path;
@@ -31,6 +33,7 @@ final class RadioSelection {
         this.allowPtt = allowPtt;
         this.usbAudioPath = usbAudioPath;
         this.receivePlayback = receivePlayback;
+        this.trusdxAudio = trusdxAudio;
     }
 
     void writeTo(Intent intent) {
@@ -42,6 +45,7 @@ final class RadioSelection {
         intent.putExtra("allowPtt", allowPtt);
         intent.putExtra("usbAudioPath", usbAudioPath);
         intent.putExtra("receivePlayback", receivePlayback);
+        intent.putExtra("trusdxAudio", trusdxAudio);
     }
 
     static RadioSelection readFrom(Intent intent) {
@@ -49,12 +53,15 @@ final class RadioSelection {
             intent.getIntExtra("transport", DUMMY), intent.getIntExtra("model", 1),
             intent.getStringExtra("path"), intent.getStringExtra("baud"),
             intent.getBooleanExtra("rtsCts", false), intent.getBooleanExtra("allowPtt", false),
-            intent.getStringExtra("usbAudioPath"), intent.getBooleanExtra("receivePlayback", false));
+            intent.getStringExtra("usbAudioPath"), intent.getBooleanExtra("receivePlayback", false),
+            intent.getBooleanExtra("trusdxAudio", false));
     }
 
     boolean valid() {
         if (usbAudioPath != null && (transport != USB || allowPtt)) return false;
         if (receivePlayback && usbAudioPath == null) return false;
+        if (trusdxAudio && (transport != USB || model != TRUSDX_MODEL || allowPtt || rtsCts
+                || !"115200".equals(baud) || usbAudioPath != null)) return false;
         if (transport == DUMMY) return model == 1 && (path == null || path.isEmpty());
         if (model <= 1 || path == null) return false;
         if (transport == USB) return path.matches("android-usb:[0-9]+:[0-9]+");

@@ -1,10 +1,14 @@
 #include "usb_serial_bridge.hpp"
 
+#include "embedded_audio.h"
 #include "jni_thread.h"
+#include "trusdx_rx.h"
 #if defined(__ANDROID__)
 #include <android/log.h>
 #endif
 
+#include <algorithm>
+#include <array>
 #include <mutex>
 
 namespace {
@@ -23,6 +27,22 @@ struct BridgeState {
 };
 
 BridgeState g_bridge;
+std::mutex usb_write_mutex;
+
+struct TruSdxState {
+  std::mutex mutex;
+  embedded_audio* audio = nullptr;
+  TruSdxRx parser;
+  uint64_t samples = 0;
+  bool streaming = false;
+};
+
+TruSdxState trusdx;
+
+bool trusdx_selected() {
+  std::lock_guard<std::mutex> lock(trusdx.mutex);
+  return trusdx.audio != nullptr;
+}
 
 struct BridgeSnapshot {
   JavaVM* jvm = nullptr;
@@ -111,6 +131,33 @@ Java_com_js8call_core_UsbSerialBridge_nativeUnregister(JNIEnv* env, jobject thiz
 
 namespace js8core::android {
 
+void usb_trusdx_select(embedded_audio* audio) {
+  std::lock_guard<std::mutex> lock(trusdx.mutex);
+  trusdx.audio = audio;
+  trusdx.parser = {};
+  trusdx.samples = 0;
+  trusdx.streaming = false;
+}
+
+bool usb_trusdx_start() {
+  {
+    std::lock_guard<std::mutex> lock(trusdx.mutex);
+    if (!trusdx.audio) return false;
+    trusdx.streaming = true;
+  }
+  constexpr uint8_t command[] = {';', 'U', 'A', '1', ';'};
+  if (usb_serial_write(command, sizeof(command), 500) == sizeof(command)) return true;
+  std::lock_guard<std::mutex> lock(trusdx.mutex);
+  trusdx.streaming = false;
+  embedded_audio_fail(trusdx.audio);
+  return false;
+}
+
+uint64_t usb_trusdx_samples() {
+  std::lock_guard<std::mutex> lock(trusdx.mutex);
+  return trusdx.samples;
+}
+
 bool usb_serial_bridge_ready() {
   std::lock_guard<std::mutex> lock(g_bridge.mutex);
   return g_bridge.bridge && g_bridge.open && g_bridge.read && g_bridge.write && g_bridge.close;
@@ -131,6 +178,13 @@ bool usb_serial_open(int device_id,
   jboolean ok = env->CallBooleanMethod(state.bridge, state.open, device_id, port_index,
                                        baud_rate, data_bits, stop_bits, parity);
   if (!clear_exception(env, "open")) return false;
+  if (ok == JNI_TRUE && trusdx_selected()) {
+    constexpr uint8_t command[] = {';', 'U', 'A', '0', ';'};
+    if (usb_serial_write(command, sizeof(command), 500) != sizeof(command)) {
+      usb_serial_close();
+      return false;
+    }
+  }
   return ok == JNI_TRUE;
 }
 
@@ -143,7 +197,11 @@ int usb_serial_read(std::uint8_t* buffer, std::size_t length, int timeout_ms) {
   JNIEnv* env = transport_env(state.jvm);
   if (!env) return -1;
 
-  jsize len = static_cast<jsize>(length);
+  bool multiplexed = trusdx_selected();
+  std::array<uint8_t, 512> serial;
+  if (multiplexed && length < 2) return -1;
+  // A U held across reads can add one CAT byte to this read's output.
+  jsize len = static_cast<jsize>(multiplexed ? std::min(length - 1, serial.size()) : length);
   jbyteArray array = env->NewByteArray(len);
   if (!array) return -1;
 
@@ -154,15 +212,29 @@ int usb_serial_read(std::uint8_t* buffer, std::size_t length, int timeout_ms) {
   }
 
   if (read > 0) {
-    env->GetByteArrayRegion(array, 0, read, reinterpret_cast<jbyte*>(buffer));
+    env->GetByteArrayRegion(array, 0, read, reinterpret_cast<jbyte*>(multiplexed ? serial.data() : buffer));
   }
 
   env->DeleteLocalRef(array);
+  if (multiplexed) {
+    std::lock_guard<std::mutex> lock(trusdx.mutex);
+    if (read < 0 && trusdx.streaming) embedded_audio_fail(trusdx.audio);
+    if (read > 0) {
+      std::array<int16_t, 512 * 7> pcm;
+      const auto parsed = trusdx.parser.consume(serial.data(), read, buffer, pcm.data());
+      if (trusdx.streaming) {
+        trusdx.samples += parsed.input_samples;
+        embedded_audio_push(trusdx.audio, pcm.data(), parsed.audio_samples * sizeof(pcm[0]));
+      }
+      return static_cast<int>(parsed.cat_bytes);
+    }
+  }
   return static_cast<int>(read);
 }
 
 int usb_serial_write(const std::uint8_t* buffer, std::size_t length, int timeout_ms) {
   if (!buffer || length == 0) return 0;
+  std::lock_guard<std::mutex> lock(usb_write_mutex);
 
   BridgeSnapshot state;
   if (!snapshot_bridge(state)) return -1;
@@ -186,6 +258,14 @@ int usb_serial_write(const std::uint8_t* buffer, std::size_t length, int timeout
 }
 
 void usb_serial_close() {
+  if (trusdx_selected()) {
+    constexpr uint8_t command[] = {';', 'U', 'A', '0', ';'};
+    usb_serial_write(command, sizeof(command), 250);
+    std::lock_guard<std::mutex> lock(trusdx.mutex);
+    trusdx.parser = {};
+    trusdx.streaming = false;
+    embedded_audio_fail(trusdx.audio);
+  }
   BridgeSnapshot state;
   if (!snapshot_bridge(state)) return;
 
@@ -221,6 +301,9 @@ int usb_serial_set_dtr(bool enabled) {
 }
 
 int usb_serial_flush() {
+  // Hamlib still flushes its CAT socket. Purging the physical serial receive
+  // queue here would discard audio delimiters and desynchronize the parser.
+  if (trusdx_selected()) return 0;
   BridgeSnapshot state;
   if (!snapshot_bridge(state) || !state.purge) return -1;
 

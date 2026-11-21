@@ -155,7 +155,7 @@ public final class CatService extends Service {
                 capture.start();
             }
             error = nativeRun(runningServer, radio.model, radio.path, radio.baud,
-                radio.rtsCts ? "Hardware" : "None", radio.allowPtt, radio.usbAudioPath != null);
+                radio.rtsCts ? "Hardware" : "None", radio.allowPtt, radio.usbAudioPath != null, radio.trusdxAudio);
         } catch (RuntimeException | LinkageError failure) {
             error = "CAT server failed: " + failure.getMessage();
         } finally {
@@ -219,13 +219,43 @@ public final class CatService extends Service {
         });
     }
 
-    private void onNativeListening() {
+    private void onNativeListening(boolean serialAudioStarted) {
         main.post(() -> {
             if (!stopping && server != 0) {
                 listening = true;
+                if (selection.trusdxAudio) {
+                    audioStatus = serialAudioStarted ? "Waiting for (tr)uSDX serial audio" : "Could not enable (tr)uSDX serial audio";
+                    if (serialAudioStarted) watchTruSdxAudio(server);
+                }
                 publishListening();
             }
         });
+    }
+
+    private void watchTruSdxAudio(long activeServer) {
+        main.postDelayed(new Runnable() {
+            private long lastSampleCount;
+            private int idleChecks;
+
+            @Override public void run() {
+                if (server != activeServer || stopping) return;
+                long count = nativeTruSdxSamples();
+                String nextStatus = audioStatus;
+                if (count != lastSampleCount) {
+                    lastSampleCount = count;
+                    idleChecks = 0;
+                    nextStatus = "(tr)uSDX serial receive ready · 48 kHz mono PCM16";
+                } else if (++idleChecks == 6) {
+                    nativeAudioFailed(activeServer);
+                    nextStatus = lastSampleCount == 0 ? "No (tr)uSDX serial audio received" : "(tr)uSDX serial audio stalled";
+                }
+                if (!nextStatus.equals(audioStatus)) {
+                    audioStatus = nextStatus;
+                    publishListening();
+                }
+                main.postDelayed(this, 500);
+            }
+        }, 500);
     }
 
     private void publishListening() {
@@ -233,6 +263,7 @@ public final class CatService extends Service {
         if (selection.usbAudioPath != null) {
             message += "\n" + (audioStatus == null ? "Opening C-Media USB receive audio" : audioStatus);
         }
+        if (selection.trusdxAudio) message += "\n" + audioStatus;
         if (selection.receivePlayback) {
             message += "\n" + (playbackStatus == null ? "Opening receive playback" : playbackStatus);
         }
@@ -312,8 +343,9 @@ public final class CatService extends Service {
 
     private static native long nativeCreate();
     private native String nativeRun(long handle, int model, String path, String baud, String handshake,
-                                    boolean allowPtt, boolean usbAudioRx);
+                                    boolean allowPtt, boolean usbAudioRx, boolean trusdxAudioRx);
     private static native void nativeAudioFailed(long handle);
+    private static native long nativeTruSdxSamples();
     private static native void nativeStop(long handle);
     private static native void nativeDestroy(long handle);
 }

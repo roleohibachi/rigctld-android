@@ -54,13 +54,16 @@ target_link_libraries(rigctld_core PUBLIC
 if(ANDROID)
     add_library(android_rigctld SHARED service_jni.cpp
         usb_audio_monitor_jni.cpp
+        transport/trusdx_rx.cpp
         transport/usb_serial_bridge_jni.cpp
         transport/bluetooth_serial_bridge_jni.cpp)
-    target_include_directories(android_rigctld PRIVATE "${HAMLIB_SOURCE}/include")
+    target_include_directories(android_rigctld PRIVATE "${HAMLIB_SOURCE}/include" "${CMAKE_CURRENT_LIST_DIR}")
     target_link_libraries(android_rigctld PRIVATE rigctld_core log)
     target_link_options(android_rigctld PRIVATE
         "-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
 else()
     add_executable(rigctld-host host_main.cpp)
     target_link_libraries(rigctld-host PRIVATE rigctld_core)
+    add_executable(test-trusdx-rx ../tests/test_trusdx_rx.cpp transport/trusdx_rx.cpp)
+    target_include_directories(test-trusdx-rx PRIVATE transport)
 endif()
