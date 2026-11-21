@@ -33,7 +33,9 @@ bash scripts/docker-build.sh test
 
 The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. It targets ARM64 devices and declares Android 12 (API 31) as its minimum. Device qualification is tracked separately in the [hardware matrix](HANDOFF.md#hardware-and-android-coverage).
 
-To inspect inputs for the receive-audio milestone, connect the rig and tap **Refresh USB audio inputs**. Select an entry to see its USB vendor and product IDs and capture endpoints. The list uses USB host enumeration, which can see interfaces omitted by Android's audio picker. **Copy diagnostics** includes the detected inputs and endpoints. On the FX-4CR, look for both `0d8c:013c` (C-Media) and `0a12:4007` (QCC3024). This picker is for enumeration. Capture verification is a separate step.
+To compare the FX-4CR's inputs on Android, close other audio apps, connect the rig by USB, keep CAT PTT off and tune to a readable signal. Tap **Refresh USB audio inputs**, select C-Media (`0d8c:013c`), and tap **Monitor**. Grant the microphone and USB permissions if prompted. Android requires microphone permission for direct access to a USB audio capture device.
+
+The monitor claims the selected USB capture interface for five seconds and displays live peak/RMS levels and a summary of frames, nonzero samples and USB packet errors. It releases the interface when the test ends. Repeat on a quiet frequency to check whether levels respond to reception. Repeat on QCC3024 (`0a12:4007`) for comparison. **Copy diagnostics** includes the most recent result and the detected endpoints. If CAT is running, confirm a frequency read still works during capture. After an unplug/replug, refresh the list and repeat on C-Media. This monitor uses direct USB Audio Class capture for the two FX-4CR interfaces and displays levels locally. Shared PCM streaming and hardware verification on the Pixel are pending.
 
 ## Verify on a phone
 

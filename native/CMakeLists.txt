@@ -41,6 +41,7 @@ target_link_libraries(rigctld_core PUBLIC
 
 if(ANDROID)
     add_library(android_rigctld SHARED service_jni.cpp
+        usb_audio_monitor_jni.cpp
         transport/usb_serial_bridge_jni.cpp
         transport/bluetooth_serial_bridge_jni.cpp)
     target_include_directories(android_rigctld PRIVATE "${HAMLIB_SOURCE}/include")

@@ -28,13 +28,9 @@ final class UsbAudioInputs {
             List<String> endpoints = new ArrayList<>();
             for (int i = 0; i < device.getInterfaceCount(); i++) {
                 UsbInterface usbInterface = device.getInterface(i);
-                if (usbInterface.getInterfaceClass() != UsbConstants.USB_CLASS_AUDIO
-                        || usbInterface.getInterfaceSubclass() != AUDIO_STREAMING_SUBCLASS) continue;
                 for (int j = 0; j < usbInterface.getEndpointCount(); j++) {
                     UsbEndpoint endpoint = usbInterface.getEndpoint(j);
-                    if (endpoint.getDirection() != UsbConstants.USB_DIR_IN
-                            || endpoint.getType() != UsbConstants.USB_ENDPOINT_XFER_ISOC
-                            || (endpoint.getAttributes() & ISOCHRONOUS_USAGE_MASK) == ISOCHRONOUS_FEEDBACK) continue;
+                    if (!isCaptureEndpoint(usbInterface, endpoint)) continue;
                     endpoints.add(String.format(Locale.ROOT, "Interface %d, alt %d, endpoint 0x%02x",
                         usbInterface.getId(), usbInterface.getAlternateSetting(), endpoint.getAddress()));
                 }
@@ -48,6 +44,14 @@ final class UsbAudioInputs {
         }
         inputs.sort(Comparator.comparing(Input::label).thenComparing(Input::deviceName));
         return inputs;
+    }
+
+    static boolean isCaptureEndpoint(UsbInterface usbInterface, UsbEndpoint endpoint) {
+        return usbInterface.getInterfaceClass() == UsbConstants.USB_CLASS_AUDIO
+            && usbInterface.getInterfaceSubclass() == AUDIO_STREAMING_SUBCLASS
+            && endpoint.getDirection() == UsbConstants.USB_DIR_IN
+            && endpoint.getType() == UsbConstants.USB_ENDPOINT_XFER_ISOC
+            && (endpoint.getAttributes() & ISOCHRONOUS_USAGE_MASK) != ISOCHRONOUS_FEEDBACK;
     }
 
     private UsbAudioInputs() {}

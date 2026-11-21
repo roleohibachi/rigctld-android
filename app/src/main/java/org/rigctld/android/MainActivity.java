@@ -29,11 +29,14 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import com.js8call.core.BluetoothSerialPortCatalog;
 import com.js8call.core.UsbSerialPortCatalog;
 
 public final class MainActivity extends Activity {
     private static final String USB_PERMISSION = "org.rigctld.android.USB_PERMISSION";
+    private static final String USB_AUDIO_PERMISSION = "org.rigctld.android.USB_AUDIO_PERMISSION";
+    private static final int RECORD_AUDIO_REQUEST = 2;
     private static final String[] BLUETOOTH_PERMISSIONS = {
         Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN
     };
@@ -46,6 +49,12 @@ public final class MainActivity extends Activity {
     private Spinner ports;
     private Spinner usbAudioInputs;
     private TextView usbAudioDetails;
+    private TextView usbAudioStatus;
+    private Button monitorAudio;
+    private Button refreshAudio;
+    private UsbDevice pendingAudioDevice;
+    private AtomicBoolean monitorCancelled;
+    private String audioMonitorReport = "";
     private EditText rigModel;
     private EditText baud;
     private CheckBox rtsCts;
@@ -74,6 +83,8 @@ public final class MainActivity extends Activity {
         public void onReceive(Context context, Intent intent) {
             if (USB_PERMISSION.equals(intent.getAction())) {
                 onUsbPermission();
+            } else if (USB_AUDIO_PERMISSION.equals(intent.getAction())) {
+                onUsbAudioPermission();
             } else {
                 render();
             }
@@ -161,6 +172,7 @@ public final class MainActivity extends Activity {
         super.onStart();
         IntentFilter filter = new IntentFilter(CatService.ACTION_STATUS);
         filter.addAction(USB_PERMISSION);
+        filter.addAction(USB_AUDIO_PERMISSION);
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
@@ -172,6 +184,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
+        if (monitorCancelled != null) monitorCancelled.set(true);
         unregisterReceiver(receiver);
         super.onStop();
     }
@@ -209,32 +222,141 @@ public final class MainActivity extends Activity {
         usbAudioInputs.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long itemId) {
                 UsbAudioInputs.Input input = (UsbAudioInputs.Input) parent.getItemAtPosition(position);
-                usbAudioDetails.setText(String.join("\n", input.endpoints()) + "\nCapture is not available yet.");
+                usbAudioDetails.setText(String.join("\n", input.endpoints()));
+                renderAudioMonitor();
             }
 
             @Override public void onNothingSelected(AdapterView<?> parent) {
                 usbAudioDetails.setText("Connect a USB audio input, then refresh.");
+                renderAudioMonitor();
             }
         });
-        Button refreshAudio = new Button(this);
+        refreshAudio = new Button(this);
         refreshAudio.setText("Refresh USB audio inputs");
         refreshAudio.setOnClickListener(view -> refreshUsbAudioInputs());
         content.addView(refreshAudio);
+        monitorAudio = new Button(this);
+        monitorAudio.setText("Monitor");
+        monitorAudio.setOnClickListener(view -> {
+            if (monitorCancelled != null) {
+                monitorCancelled.set(true);
+                monitorAudio.setEnabled(false);
+            } else {
+                requestAudioMonitor();
+            }
+        });
+        content.addView(monitorAudio);
+        usbAudioStatus = new TextView(this);
+        usbAudioStatus.setTextIsSelectable(true);
+        content.addView(usbAudioStatus);
     }
 
     private void refreshUsbAudioInputs() {
+        if (pendingAudioDevice != null || monitorCancelled != null) return;
         UsbAudioInputs.Input previous = (UsbAudioInputs.Input) usbAudioInputs.getSelectedItem();
         List<UsbAudioInputs.Input> inputs = UsbAudioInputs.list(getSystemService(UsbManager.class));
         usbAudioInputs.setAdapter(adapter(inputs));
-        usbAudioInputs.setEnabled(!inputs.isEmpty());
         if (inputs.isEmpty()) usbAudioDetails.setText("Connect a USB audio input, then refresh.");
-        if (previous == null) return;
-        for (int i = 0; i < inputs.size(); i++) {
-            if (inputs.get(i).deviceName().equals(previous.deviceName())) {
-                usbAudioInputs.setSelection(i);
-                break;
+        if (previous != null) {
+            for (int i = 0; i < inputs.size(); i++) {
+                if (inputs.get(i).deviceName().equals(previous.deviceName())) {
+                    usbAudioInputs.setSelection(i);
+                    break;
+                }
             }
         }
+        renderAudioMonitor();
+    }
+
+    private UsbDevice selectedAudioDevice() {
+        UsbAudioInputs.Input input = (UsbAudioInputs.Input) usbAudioInputs.getSelectedItem();
+        return input == null ? null : getSystemService(UsbManager.class).getDeviceList().get(input.deviceName());
+    }
+
+    private void renderAudioMonitor() {
+        boolean running = monitorCancelled != null;
+        boolean available = !running && pendingAudioDevice == null;
+        usbAudioInputs.setEnabled(available && usbAudioInputs.getCount() > 0);
+        refreshAudio.setEnabled(available);
+        monitorAudio.setText(running ? "Stop monitor" : "Monitor");
+        monitorAudio.setEnabled(running ? !monitorCancelled.get()
+            : available && UsbAudioMonitor.supports(selectedAudioDevice()));
+    }
+
+    private void requestAudioMonitor() {
+        pendingAudioDevice = selectedAudioDevice();
+        if (!UsbAudioMonitor.supports(pendingAudioDevice)) {
+            pendingAudioDevice = null;
+            usbAudioStatus.setText("Selected USB input is unavailable. Refresh USB audio inputs.");
+            renderAudioMonitor();
+            return;
+        }
+        renderAudioMonitor();
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO_REQUEST);
+        } else {
+            requestUsbAudioPermission();
+        }
+    }
+
+    private void requestUsbAudioPermission() {
+        if (pendingAudioDevice == null) return;
+        UsbManager manager = getSystemService(UsbManager.class);
+        UsbDevice device = manager.getDeviceList().get(pendingAudioDevice.getDeviceName());
+        if (device == null || device.getDeviceId() != pendingAudioDevice.getDeviceId()) {
+            finishAudioPermission("USB input disconnected. Refresh USB audio inputs.");
+        } else if (manager.hasPermission(device)) {
+            onUsbAudioPermission();
+        } else {
+            PendingIntent result = PendingIntent.getBroadcast(this, 1,
+                new Intent(USB_AUDIO_PERMISSION).setPackage(getPackageName()),
+                PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_MUTABLE);
+            manager.requestPermission(device, result);
+        }
+    }
+
+    private void finishAudioPermission(String message) {
+        pendingAudioDevice = null;
+        usbAudioStatus.setText(message);
+        renderAudioMonitor();
+    }
+
+    private void onUsbAudioPermission() {
+        if (pendingAudioDevice == null) return;
+        UsbManager manager = getSystemService(UsbManager.class);
+        UsbDevice device = pendingAudioDevice;
+        if (!manager.hasPermission(device)) {
+            finishAudioPermission("USB audio permission was not granted.");
+            return;
+        }
+        pendingAudioDevice = null;
+        UsbAudioInputs.Input input = (UsbAudioInputs.Input) usbAudioInputs.getSelectedItem();
+        String label = input.label();
+        AtomicBoolean cancelled = new AtomicBoolean();
+        monitorCancelled = cancelled;
+        audioMonitorReport = "";
+        usbAudioStatus.setText(label + "\nOpening USB input…");
+        renderAudioMonitor();
+        new Thread(() -> {
+            String outcome;
+            try {
+                outcome = UsbAudioMonitor.measure(manager, device, cancelled, progress -> runOnUiThread(() -> {
+                    if (!isDestroyed() && monitorCancelled == cancelled && !cancelled.get()) {
+                        usbAudioStatus.setText(label + "\n" + progress);
+                    }
+                }));
+            } catch (RuntimeException | LinkageError failure) {
+                outcome = "USB monitor failed: " + failure.getClass().getSimpleName() + ": " + failure.getMessage();
+            }
+            String report = label + "\n" + outcome;
+            runOnUiThread(() -> {
+                if (isDestroyed() || monitorCancelled != cancelled) return;
+                monitorCancelled = null;
+                audioMonitorReport = report;
+                usbAudioStatus.setText(report);
+                refreshUsbAudioInputs();
+            });
+        }, "usb-audio-monitor").start();
     }
 
     private EditText numberInput(String label, String value) {
@@ -259,6 +381,13 @@ public final class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == 1) refreshPorts();
+        if (requestCode == RECORD_AUDIO_REQUEST) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+                requestUsbAudioPermission();
+            } else {
+                finishAudioPermission("Microphone permission is required for USB audio capture.");
+            }
+        }
     }
 
     private void refreshPorts() {
@@ -393,6 +522,7 @@ public final class MainActivity extends Activity {
             diagnostics.append('\n').append(input.label()).append(" · ")
                 .append(String.join("; ", input.endpoints()));
         }
+        if (!audioMonitorReport.isEmpty()) diagnostics.append("\nUSB audio monitor:\n").append(audioMonitorReport);
         getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("rigctld diagnostics", diagnostics));
     }
 }
