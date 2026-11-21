@@ -111,6 +111,13 @@ class RigctldTests(unittest.TestCase):
             self.assertTrue(reply.readline().strip().isdigit())
 
     def test_dummy_receive_stream_with_concurrent_cat(self):
+        self.check_receive_stream_with_cat()
+
+    def test_session_audio_provider_with_concurrent_cat(self):
+        self.restart_with_policy("audio-fixture")
+        self.check_receive_stream_with_cat(sample=1234)
+
+    def check_receive_stream_with_cat(self, sample=None):
         with self.connect() as cat, cat.makefile("rb") as cat_reply:
             with self.connect() as owner, owner.makefile("rb") as reply, socket.socket(
                 socket.AF_INET, socket.SOCK_DGRAM
@@ -164,6 +171,8 @@ class RigctldTests(unittest.TestCase):
                     self.assertEqual(len(data), STREAM_HEADER.size + length)
                     pcm = data[STREAM_HEADER.size + (20 if control else 0):]
                     if any(pcm):
+                        if sample is not None:
+                            self.assertEqual(set(struct.iter_unpack("<h", pcm)), {(sample,)})
                         break
                 else:
                     self.fail("No nonzero PCM arrived from the dummy backend")

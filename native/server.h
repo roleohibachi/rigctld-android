@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include "embedded_audio.h"
 
 class RigctldServer {
 public:
@@ -15,7 +16,12 @@ public:
         std::string handshake;
         bool allow_ptt = false;
         bool enforce_radio_policy = false;
+        bool usb_audio_rx = false;
     };
+
+    RigctldServer();
+    ~RigctldServer();
+    embedded_audio* audio() noexcept { return audio_; }
 
     // One worker calls run(). Any thread may request stop.
     std::string run(uint16_t port, const Radio& radio, const std::function<void()>& on_listening);
@@ -24,4 +30,5 @@ public:
 private:
     static_assert(std::atomic<bool>::is_always_lock_free);
     std::atomic<bool> stopping_{false};
+    embedded_audio* audio_;
 };

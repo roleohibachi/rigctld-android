@@ -27,14 +27,15 @@ Java_org_rigctld_android_CatService_nativeCreate(JNIEnv*, jclass) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_org_rigctld_android_CatService_nativeRun(
     JNIEnv* env, jobject service, jlong handle, jint model, jstring path,
-    jstring baud, jstring handshake, jboolean allow_ptt) {
+    jstring baud, jstring handshake, jboolean allow_ptt, jboolean usb_audio_rx) {
     jclass type = env->GetObjectClass(service);
     jmethodID listening = env->GetMethodID(type, "onNativeListening", "()V");
     if (listening == nullptr) return nullptr;
     try {
         const RigctldServer::Radio radio{
             static_cast<unsigned>(model), string_from_java(env, path),
-            string_from_java(env, baud), string_from_java(env, handshake), allow_ptt == JNI_TRUE
+            string_from_java(env, baud), string_from_java(env, handshake), allow_ptt == JNI_TRUE,
+            false, usb_audio_rx == JNI_TRUE
         };
         if (env->ExceptionCheck()) return nullptr;
         const auto error = server_from_handle(handle)->run(4532, radio, [&] {
@@ -46,6 +47,11 @@ Java_org_rigctld_android_CatService_nativeRun(
     } catch (const std::exception&) {
         return env->NewStringUTF("Native CAT server failed");
     }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rigctld_android_CatService_nativeAudioFailed(JNIEnv*, jclass, jlong handle) {
+    embedded_audio_fail(server_from_handle(handle)->audio());
 }
 
 extern "C" JNIEXPORT void JNICALL

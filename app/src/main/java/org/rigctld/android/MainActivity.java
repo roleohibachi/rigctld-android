@@ -52,7 +52,9 @@ public final class MainActivity extends Activity {
     private TextView usbAudioStatus;
     private Button monitorAudio;
     private Button refreshAudio;
+    private CheckBox shareAudio;
     private UsbDevice pendingAudioDevice;
+    private RadioSelection pendingAudioRadio;
     private AtomicBoolean monitorCancelled;
     private String audioMonitorReport = "";
     private EditText rigModel;
@@ -192,16 +194,18 @@ public final class MainActivity extends Activity {
     private void render() {
         CatService.Status state = CatService.status();
         status.setText(state.message);
-        boolean ready = !state.active && awaitingUsbPermission == null;
+        boolean ready = !state.active && awaitingUsbPermission == null
+            && pendingAudioDevice == null && monitorCancelled == null;
         start.setEnabled(ready);
         stop.setEnabled(state.active);
         transport.setEnabled(ready);
         ports.setEnabled(ready);
         refresh.setEnabled(ready);
-        allowPtt.setEnabled(ready);
+        allowPtt.setEnabled(ready && (transport.getSelectedItemPosition() != RadioSelection.USB || !shareAudio.isChecked()));
         rtsCts.setEnabled(ready);
         rigModel.setEnabled(ready);
         baud.setEnabled(ready);
+        renderAudioMonitor();
     }
 
     private <T> ArrayAdapter<T> adapter(List<T> items) {
@@ -235,6 +239,13 @@ public final class MainActivity extends Activity {
         refreshAudio.setText("Refresh USB audio inputs");
         refreshAudio.setOnClickListener(view -> refreshUsbAudioInputs());
         content.addView(refreshAudio);
+        shareAudio = new CheckBox(this);
+        shareAudio.setText("Share selected USB audio (receive only)");
+        shareAudio.setOnCheckedChangeListener((button, enabled) -> {
+            if (enabled) allowPtt.setChecked(false);
+            render();
+        });
+        content.addView(shareAudio);
         monitorAudio = new Button(this);
         monitorAudio.setText("Monitor");
         monitorAudio.setOnClickListener(view -> {
@@ -274,24 +285,33 @@ public final class MainActivity extends Activity {
     }
 
     private void renderAudioMonitor() {
+        CatService.Status state = CatService.status();
+        boolean sharing = state.active && state.radio != null && state.radio.usbAudioPath != null;
         boolean running = monitorCancelled != null;
-        boolean available = !running && pendingAudioDevice == null;
+        boolean available = !running && !sharing && pendingAudioDevice == null;
         usbAudioInputs.setEnabled(available && usbAudioInputs.getCount() > 0);
         refreshAudio.setEnabled(available);
         monitorAudio.setText(running ? "Stop monitor" : "Monitor");
         monitorAudio.setEnabled(running ? !monitorCancelled.get()
             : available && UsbAudioMonitor.supports(selectedAudioDevice()));
+        shareAudio.setVisibility(transport.getSelectedItemPosition() == RadioSelection.USB ? View.VISIBLE : View.GONE);
+        shareAudio.setEnabled(available && !state.active && awaitingUsbPermission == null);
     }
 
     private void requestAudioMonitor() {
-        pendingAudioDevice = selectedAudioDevice();
-        if (!UsbAudioMonitor.supports(pendingAudioDevice)) {
-            pendingAudioDevice = null;
+        UsbDevice device = selectedAudioDevice();
+        if (!UsbAudioMonitor.supports(device)) {
             usbAudioStatus.setText("Selected USB input is unavailable. Refresh USB audio inputs.");
             renderAudioMonitor();
             return;
         }
-        renderAudioMonitor();
+        requestAudioPermissions(device, null);
+    }
+
+    private void requestAudioPermissions(UsbDevice device, RadioSelection radio) {
+        pendingAudioDevice = device;
+        pendingAudioRadio = radio;
+        render();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO_REQUEST);
         } else {
@@ -317,8 +337,9 @@ public final class MainActivity extends Activity {
 
     private void finishAudioPermission(String message) {
         pendingAudioDevice = null;
+        pendingAudioRadio = null;
         usbAudioStatus.setText(message);
-        renderAudioMonitor();
+        render();
     }
 
     private void onUsbAudioPermission() {
@@ -329,14 +350,20 @@ public final class MainActivity extends Activity {
             finishAudioPermission("USB audio permission was not granted.");
             return;
         }
+        RadioSelection radio = pendingAudioRadio;
         pendingAudioDevice = null;
+        pendingAudioRadio = null;
+        if (radio != null) {
+            startServiceForRadio(radio);
+            return;
+        }
         UsbAudioInputs.Input input = (UsbAudioInputs.Input) usbAudioInputs.getSelectedItem();
         String label = input.label();
         AtomicBoolean cancelled = new AtomicBoolean();
         monitorCancelled = cancelled;
         audioMonitorReport = "";
         usbAudioStatus.setText(label + "\nOpening USB input…");
-        renderAudioMonitor();
+        render();
         new Thread(() -> {
             String outcome;
             try {
@@ -355,6 +382,7 @@ public final class MainActivity extends Activity {
                 audioMonitorReport = report;
                 usbAudioStatus.setText(report);
                 refreshUsbAudioInputs();
+                render();
             });
         }, "usb-audio-monitor").start();
     }
@@ -415,6 +443,7 @@ public final class MainActivity extends Activity {
         }
         ports.setAdapter(adapter(available));
         selectionMessage.setText(message);
+        render();
     }
 
     private void selectRadio() {
@@ -445,8 +474,17 @@ public final class MainActivity extends Activity {
                 return;
             }
         }
+        String audioPath = null;
+        if (choice == RadioSelection.USB && shareAudio.isChecked()) {
+            UsbDevice audio = selectedAudioDevice();
+            if (!UsbAudioMonitor.supportsRxStream(audio)) {
+                selectionMessage.setText("Select the C-Media (0d8c:013c) USB input to share receive audio.");
+                return;
+            }
+            audioPath = audio.getDeviceName();
+        }
         RadioSelection selection = new RadioSelection(choice, model, port.path, rate,
-            choice == RadioSelection.USB && rtsCts.isChecked(), allowPtt.isChecked());
+            choice == RadioSelection.USB && rtsCts.isChecked(), audioPath == null && allowPtt.isChecked(), audioPath);
         if (selection.allowPtt) {
             new AlertDialog.Builder(this).setTitle("Allow PTT for this session?")
                 .setMessage("Local rigctld clients can key the radio. For testing, connect a dummy load and select low power.")
@@ -496,6 +534,20 @@ public final class MainActivity extends Activity {
     }
 
     private void start(RadioSelection selection) {
+        if (selection.usbAudioPath != null) {
+            UsbDevice audio = getSystemService(UsbManager.class).getDeviceList().get(selection.usbAudioPath);
+            if (!UsbAudioMonitor.supportsRxStream(audio)) {
+                selectionMessage.setText("USB audio disconnected. Refresh USB audio inputs.");
+                render();
+                return;
+            }
+            requestAudioPermissions(audio, selection);
+            return;
+        }
+        startServiceForRadio(selection);
+    }
+
+    private void startServiceForRadio(RadioSelection selection) {
         start.setEnabled(false);
         Intent service = new Intent(this, CatService.class);
         selection.writeTo(service);

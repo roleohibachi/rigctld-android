@@ -158,7 +158,8 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
     if (current_command == nullptr) return -RIG_EINTERNAL;
     auto& [control, client] = *current_command;
     if (name.substr(0, 7) == "stream_") {
-        return control.radio.model == RIG_MODEL_DUMMY && control.radio.path.empty() ? RIG_OK : -RIG_ENAVAIL;
+        return ((control.radio.model == RIG_MODEL_DUMMY && control.radio.path.empty())
+            || control.radio.usb_audio_rx) ? RIG_OK : -RIG_ENAVAIL;
     }
     if (control.radio.path.empty() && !control.radio.enforce_radio_policy) return RIG_OK;
 
@@ -240,7 +241,9 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
     if (open_status != RIG_OK) return std::string("Open Hamlib rig: ") + rigerror(open_status);
 
     std::string error;
-    if (listen(listener.get(), static_cast<int>(max_clients)) != 0) {
+    if (radio.usb_audio_rx && embedded_audio_attach(audio_, rig.get()) != RIG_OK) {
+        error = "Attach USB receive audio";
+    } else if (listen(listener.get(), static_cast<int>(max_clients)) != 0) {
         error = system_error("Listen on CAT socket");
     } else if (embedded_stream_start() != 0) {
         error = "Initialize Hamlib streaming";
@@ -309,6 +312,12 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
     }
     rig_close(rig.get());
     return error;
+}
+
+RigctldServer::RigctldServer() : audio_(embedded_audio_create()) {}
+
+RigctldServer::~RigctldServer() {
+    embedded_audio_destroy(audio_);
 }
 
 void RigctldServer::stop() noexcept {

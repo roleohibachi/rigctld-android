@@ -20,6 +20,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import com.js8call.core.BluetoothSerialBridge;
 import com.js8call.core.UsbSerialBridge;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class CatService extends Service {
     static final String ACTION_STATUS = "org.rigctld.android.STATUS";
@@ -32,6 +33,8 @@ public final class CatService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private long server;
     private boolean stopping;
+    private boolean listening;
+    private String audioStatus;
     private UsbSerialBridge usb;
     private BluetoothSerialBridge bluetooth;
     private RadioSelection selection;
@@ -139,25 +142,81 @@ public final class CatService extends Service {
     }
 
     private void runServer(long runningServer, RadioSelection radio) {
+        AtomicBoolean cancelAudio = new AtomicBoolean();
+        Thread capture = null;
         String error;
         try {
+            if (radio.usbAudioPath != null) {
+                capture = new Thread(() -> runUsbAudio(runningServer, radio.usbAudioPath, cancelAudio), "rigctld-usb-audio");
+                capture.start();
+            }
             error = nativeRun(runningServer, radio.model, radio.path, radio.baud,
-                radio.rtsCts ? "Hardware" : "None", radio.allowPtt);
+                radio.rtsCts ? "Hardware" : "None", radio.allowPtt, radio.usbAudioPath != null);
         } catch (RuntimeException | LinkageError failure) {
             error = "CAT server failed: " + failure.getMessage();
+        } finally {
+            cancelAudio.set(true);
+            if (capture != null) {
+                // Native capture uses bounded, interruptible polls. The server handle stays live until it returns.
+                boolean interrupted = false;
+                while (capture.isAlive()) {
+                    try {
+                        capture.join();
+                    } catch (InterruptedException ignored) {
+                        interrupted = true;
+                    }
+                }
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         }
         final String result = error;
         main.post(() -> finish(result));
     }
 
+    private void runUsbAudio(long runningServer, String path, AtomicBoolean cancelled) {
+        String outcome;
+        try {
+            UsbManager manager = getSystemService(UsbManager.class);
+            UsbDevice device = manager.getDeviceList().get(path);
+            if (!UsbAudioMonitor.supportsRxStream(device) || !manager.hasPermission(device)) {
+                outcome = "Selected USB audio input unavailable";
+            } else {
+                outcome = UsbAudioMonitor.capture(manager, device, cancelled, ready -> main.post(() -> {
+                    if (server != runningServer || stopping) return;
+                    audioStatus = ready;
+                    if (listening) publishListening();
+                }), runningServer);
+            }
+        } catch (RuntimeException | LinkageError failure) {
+            outcome = "USB audio failed: " + failure.getMessage();
+        }
+        nativeAudioFailed(runningServer);
+        if (!cancelled.get()) {
+            String message = outcome;
+            main.post(() -> {
+                if (server != runningServer || stopping) return;
+                audioStatus = message;
+                if (listening) publishListening();
+            });
+        }
+    }
+
     private void onNativeListening() {
         main.post(() -> {
             if (!stopping && server != 0) {
-                String message = "Listening on " + ENDPOINT;
-                publish(true, message);
-                getSystemService(NotificationManager.class).notify(NOTIFICATION, notification(message));
+                listening = true;
+                publishListening();
             }
         });
+    }
+
+    private void publishListening() {
+        String message = "Listening on " + ENDPOINT;
+        if (selection.usbAudioPath != null) {
+            message += "\n" + (audioStatus == null ? "Opening C-Media USB receive audio" : audioStatus);
+        }
+        publish(true, message);
+        getSystemService(NotificationManager.class).notify(NOTIFICATION, notification(message));
     }
 
     private void requestStop() {
@@ -194,6 +253,8 @@ public final class CatService extends Service {
         selection = null;
         stoppedReason = null;
         stopping = false;
+        listening = false;
+        audioStatus = null;
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -228,7 +289,9 @@ public final class CatService extends Service {
     }
 
     private static native long nativeCreate();
-    private native String nativeRun(long handle, int model, String path, String baud, String handshake, boolean allowPtt);
+    private native String nativeRun(long handle, int model, String path, String baud, String handshake,
+                                    boolean allowPtt, boolean usbAudioRx);
+    private static native void nativeAudioFailed(long handle);
     private static native void nativeStop(long handle);
     private static native void nativeDestroy(long handle);
 }

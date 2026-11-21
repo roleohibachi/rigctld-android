@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "server.h"
+
 #include <jni.h>
 #include <linux/usbdevice_fs.h>
 #include <poll.h>
@@ -86,15 +88,21 @@ bool is_cancelled(JNIEnv* env, jobject cancelled, jmethodID get) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     JNIEnv* env, jclass, jint fd, jint endpoint, jint packet_size, jint channels,
-    jobject cancelled, jobject update) {
+    jobject cancelled, jobject update, jlong server_handle) {
+    auto* server = reinterpret_cast<RigctldServer*>(server_handle);
+    auto* audio = server ? server->audio() : nullptr;
     if (fd < 0 || packet_size <= 0 || packet_size > max_packet_size
-        || (channels != 1 && channels != 2) || endpoint < 0x81 || endpoint > 0x8f) {
+        || (channels != 1 && channels != 2) || endpoint < 0x81 || endpoint > 0x8f
+        || (server && (!audio || channels != 1))) {
         return env->NewStringUTF("Invalid USB capture parameters.");
     }
     jmethodID get = env->GetMethodID(env->GetObjectClass(cancelled), "get", "()Z");
     if (!get) return nullptr;
-    jmethodID accept = env->GetMethodID(env->GetObjectClass(update), "accept", "(Ljava/lang/Object;)V");
-    if (!accept) return nullptr;
+    jmethodID accept = nullptr;
+    if (update) {
+        accept = env->GetMethodID(env->GetObjectClass(update), "accept", "(Ljava/lang/Object;)V");
+        if (!accept) return nullptr;
+    }
 
     TransferQueue queue{fd, {}};
     int error = 0;
@@ -119,10 +127,17 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     int packets = 0;
     int packet_errors = 0;
     const auto start = Clock::now();
-    const auto end = start + 5s;
+    const auto end = audio ? Clock::time_point::max() : start + 5s;
+    auto last_frames = start;
     auto next_update = start + 250ms;
+    bool reported_ready = false;
     char message[256];
     while (error == 0 && Clock::now() < end && !is_cancelled(env, cancelled, get)) {
+        if (audio && Clock::now() - last_frames > 2s) {
+            operation = "receive frames";
+            error = ETIMEDOUT;
+            break;
+        }
         pollfd waiter{fd, POLLOUT, 0};
         int ready = poll(&waiter, 1, 100);
         if (ready == 0 || (ready < 0 && errno == EINTR)) continue;
@@ -146,19 +161,30 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         }
         for (int i = 0; i < packets_per_transfer; ++i) {
             const auto& packet = completed->iso_frame_desc[i];
-            ++packets;
+            if (!audio) ++packets;
             if (packet.status != 0 || packet.actual_length > static_cast<unsigned>(packet_size)
                 || packet.actual_length % (channels * 2) != 0) {
-                ++packet_errors;
+                if (!audio) ++packet_errors;
                 continue;
             }
             const auto* data = transfer.bytes.data() + i * packet_size;
-            total.add(data, packet.actual_length, channels);
-            recent.add(data, packet.actual_length, channels);
+            if (audio && packet.actual_length > 0) {
+                embedded_audio_push(audio, data, packet.actual_length);
+                last_frames = Clock::now();
+            } else if (!audio) {
+                total.add(data, packet.actual_length, channels);
+                recent.add(data, packet.actual_length, channels);
+            }
         }
-        if (Clock::now() >= next_update) {
-            std::snprintf(message, sizeof(message), "%d frames | Current peak %d | RMS %.0f",
-                total.frames, recent.peak, recent.rms(channels));
+        if (update && ((audio && !reported_ready && last_frames != start)
+                       || (!audio && Clock::now() >= next_update))) {
+            if (audio) {
+                std::snprintf(message, sizeof(message), "C-Media USB receive ready · 48 kHz mono PCM16");
+                reported_ready = true;
+            } else {
+                std::snprintf(message, sizeof(message), "%d frames | Current peak %d | RMS %.0f",
+                    total.frames, recent.peak, recent.rms(channels));
+            }
             jstring progress = env->NewStringUTF(message);
             if (!progress) return nullptr;
             env->CallVoidMethod(update, accept, progress);
@@ -171,7 +197,7 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         error = queue.submit(transfer);
     }
     if (env->ExceptionCheck()) return nullptr;
-    if (error == 0 && total.frames == 0 && !is_cancelled(env, cancelled, get)) {
+    if (!audio && error == 0 && total.frames == 0 && !is_cancelled(env, cancelled, get)) {
         operation = "receive frames";
         error = ETIMEDOUT;
     }
@@ -184,6 +210,7 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         std::snprintf(status, sizeof(status), "%s", total.nonzero == 0 ? "All samples were zero." : "Samples received.");
     }
     if (env->ExceptionCheck()) return nullptr;
+    if (audio) return env->NewStringUTF(status);
     std::snprintf(message, sizeof(message),
         "%s\n48 kHz / %d ch / PCM16 | Frames %d | Nonzero samples %d\nPeak %d | RMS %.0f | USB packet errors %d/%d",
         status, channels, total.frames, total.nonzero, total.peak, total.rms(channels), packet_errors, packets);

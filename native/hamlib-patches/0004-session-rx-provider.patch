@@ -1,0 +1,76 @@
+diff --git a/src/stream.c b/src/stream.c
+index 5dd27814a..23ccfc859 100644
+--- a/src/stream.c
++++ b/src/stream.c
+@@ -110,3 +110,7 @@ static int stream_teardown(struct rig_stream_state *ss,
+
+-    if (stream->rig && stream->rig->caps->stream_close)
++    if (ss->rx_provider.close)
++    {
++        ss->rx_provider.close(ss->rx_provider.context, stream);
++    }
++    else if (stream->rig && stream->rig->caps->stream_close)
+     {
+@@ -697,2 +701,20 @@ int stream_set_session_caps(RIG *rig, const struct rig_stream_caps *caps,
+
++int stream_set_rx_provider(RIG *rig, const struct stream_rx_provider *provider,
++                           const struct rig_stream_caps *caps)
++{
++    if (!provider || !provider->open || !provider->close || !caps
++            || caps->type != RIG_STREAM_TYPE_AUDIO_RX)
++    {
++        return -RIG_EINVAL;
++    }
++
++    int rc = stream_set_session_caps(rig, caps, 1);
++    if (rc == RIG_OK)
++    {
++        get_stream_state(rig)->rx_provider = *provider;
++    }
++    return rc;
++}
++
++
+ int HAMLIB_API rig_stream_caps_count(RIG *rig)
+@@ -1199,3 +1221,5 @@ int HAMLIB_API rig_stream_open(RIG *rig,
+
+-    if (!rig->caps->stream_open)
++    struct rig_stream_state *provider_state = get_stream_state(rig);
++    int external_rx = provider_state && provider_state->rx_provider.open;
++    if (!external_rx && !rig->caps->stream_open)
+     {
+@@ -1462,3 +1486,5 @@ int HAMLIB_API rig_stream_open(RIG *rig,
+
+-    int ret = rig->caps->stream_open(rig, s);
++    int ret = external_rx
++              ? ss->rx_provider.open(ss->rx_provider.context, s)
++              : rig->caps->stream_open(rig, s);
+
+@@ -1899,3 +1925,3 @@ int HAMLIB_API rig_stream_read(RIG *rig,
+     /* Use backend hook if available */
+-    if (rig->caps->stream_read)
++    if (!get_stream_state(rig)->rx_provider.open && rig->caps->stream_read)
+     {
+diff --git a/src/stream.h b/src/stream.h
+index 5220c98ab..599998855 100644
+--- a/src/stream.h
++++ b/src/stream.h
+@@ -188,2 +188,14 @@ struct rig_stream
+
++/* Optional per-session external PCM producer. Install before serving
++ * clients, and keep its context alive until all streams have closed. */
++struct stream_rx_provider
++{
++    void *context;
++    int (*open)(void *context, struct rig_stream *stream);
++    void (*close)(void *context, struct rig_stream *stream);
++};
++
++int stream_set_rx_provider(RIG *rig, const struct stream_rx_provider *provider,
++                           const struct rig_stream_caps *caps);
++
+ /* Per-rig streaming state (pointed to by rig_state.stream_state). */
+@@ -209,2 +221,3 @@ struct rig_stream_state
+     struct rig_stream_caps *session_caps;
++    struct stream_rx_provider rx_provider;
+ };
