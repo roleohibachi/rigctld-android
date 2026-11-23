@@ -228,9 +228,11 @@ permission prompts. Approve any prompts on the phone. Check `status` for
 starting another session.
 
 The CLI's Android components ship only in debug builds and require
-Android's privileged debugging permission. These commands start
-receive-only physical sessions. Enable CAT PTT or USB transmit audio
-through the app's confirmation dialog when testing transmit.
+Android's privileged debugging permission. Start requests default to receive
+only. For the supervised FX-4CR dummy-load test, append `--usb-tx` to the
+USB receive command. For CAT-only PTT use `--cat-ptt` without `--audio`.
+The app shows its PTT confirmation on the phone. Check `status` for the
+confirmation result and transmit audio readiness.
 
 On the Pixel 8a (Android 17), the CLI started and stopped the dummy rig,
 rejected a stale USB port ID, and started an FX-4CR session with C-Media

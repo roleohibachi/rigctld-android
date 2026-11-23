@@ -557,16 +557,26 @@ public class MainActivity extends Activity {
             choice == RadioSelection.USB && rtsCts.isChecked() && !trusdxAudio,
             usbTx || (audioPath == null && !trusdxAudio && allowPtt.isChecked()),
             audioPath, audioPath != null && !usbTx && receivePlayback.isChecked(), trusdxAudio, usbTx);
+        startWithConfirmation(selection, port.deviceId);
+    }
+
+    final void startWithConfirmation(RadioSelection selection, int deviceId) {
+        if (!selection.valid()) throw new IllegalArgumentException("Invalid rig configuration");
+        if (!start.isEnabled() || CatService.status().active) {
+            throw new IllegalStateException("Stop the current session or finish the permission prompt first");
+        }
         if (selection.allowPtt) {
+            onRadioStartProgress("Waiting for PTT confirmation", StartProgress.WAITING);
             new AlertDialog.Builder(this).setTitle("Allow PTT for this session?")
                 .setMessage(selection.usbTx
                     ? "A local client can transmit through the radio’s USB audio. Connect the dummy load, verify low power on the radio, and supervise the test."
                     : "Local rigctld clients can key the radio. For testing, connect a dummy load and select low power.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Allow PTT", (dialog, button) -> startWithPermission(selection, port.deviceId))
+                .setNegativeButton("Cancel", (dialog, button) -> onRadioStartProgress("PTT confirmation cancelled", StartProgress.FAILED))
+                .setOnCancelListener(dialog -> onRadioStartProgress("PTT confirmation cancelled", StartProgress.FAILED))
+                .setPositiveButton("Allow PTT", (dialog, button) -> startWithPermission(selection, deviceId))
                 .show();
         } else {
-            startWithPermission(selection, port.deviceId);
+            startWithPermission(selection, deviceId);
         }
     }
 
@@ -598,10 +608,7 @@ public class MainActivity extends Activity {
         if (selection.allowPtt || !selection.valid()) {
             throw new IllegalArgumentException("Invalid receive-only rig configuration");
         }
-        if (!start.isEnabled() || CatService.status().active) {
-            throw new IllegalStateException("Stop the current session or finish the permission prompt first");
-        }
-        startWithPermission(selection, deviceId);
+        startWithConfirmation(selection, deviceId);
     }
 
     private void onUsbPermission() {

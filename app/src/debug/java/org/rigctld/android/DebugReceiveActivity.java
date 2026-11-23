@@ -58,6 +58,12 @@ public final class DebugReceiveActivity extends MainActivity {
         boolean rtsCts = request.getBooleanExtra("rts_cts", false);
         boolean playback = request.getBooleanExtra("playback_capture", false);
         boolean trusdx = request.getBooleanExtra("trusdx_audio", false);
+        boolean usbTx = request.getBooleanExtra("usb_tx", false);
+        boolean catPtt = request.getBooleanExtra("cat_ptt", false);
+        if (usbTx && catPtt) throw new IllegalArgumentException("Choose USB transmit audio or CAT PTT");
+        if (usbTx && (audio == null || playback || trusdx)) {
+            throw new IllegalArgumentException("USB transmit audio requires --audio and excludes playback capture");
+        }
         if (baud < 0) throw new IllegalArgumentException("Baud must be positive or omitted");
         String rate = baud == 0 ? "" : Integer.toString(baud);
 
@@ -95,7 +101,9 @@ public final class DebugReceiveActivity extends MainActivity {
                 throw new IllegalArgumentException("Select dummy, usb or bluetooth transport");
             }
         }
-        startReceiveOnly(new RadioSelection(transportId, model, port, rate, rtsCts, false,
-            audio, playback, trusdx, false), deviceId);
+        RadioSelection selection = new RadioSelection(transportId, model, port, rate, rtsCts, usbTx || catPtt,
+            audio, playback, trusdx, usbTx);
+        if (usbTx || catPtt) startWithConfirmation(selection, deviceId);
+        else startReceiveOnly(selection, deviceId);
     }
 }
