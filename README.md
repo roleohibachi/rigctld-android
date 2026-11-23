@@ -26,6 +26,8 @@ On 2026-11-23, the Pixel 8a on Android 17 (API 37) enumerated playback endpoints
 
 The direct C-Media output check on the same setup completed 96,384 all-zero stereo PCM16 frames at 48 kHz with zero USB packet errors out of 2,008 packets. A second check stopped on request after 25,728 all-zero frames with zero packet errors. The checks ran with the CAT service stopped. Afterward, C-Media receive sharing resumed, JS8Android reconnected, and CAT again reported PTT off.
 
+The network version of the silence check passed on the same Pixel and FX-4CR. Hamlib sent 48,000 zero-valued mono PCM16 frames through the rigctld TX stream, and the C-Media USB output completed all 48,000 as stereo frames. Across startup, playback and drain, USB completed 2,536 packets with zero errors. The check confirmed simulated PTT off on the dummy rig, which owned the CAT connection for the check.
+
 The Docker host suite verifies 48 kHz mono PCM16 over IPv4 loopback UDP from the embedded dummy rig and from a per-session provider fed a known sample pattern. Both answer CAT on a second TCP connection. The tests also cover stream ownership, disconnect cleanup, multicast rejection, and TX rejection for ordinary sessions. Run them with `bash scripts/docker-build.sh test`.
 
 The host test runner has an explicit `dummy-tx-loopback` mode. Hamlib routes
@@ -91,10 +93,12 @@ The monitor claims the selected USB capture interface for five seconds and displ
 
 To check the C-Media output with no RF, stop rigctld, select C-Media
 (`0d8c:013c`), and tap **Check USB output (silence)**. It checks the
-advertised format and sends two seconds of zero samples directly to the USB
-playback interface. **Stop monitor** cancels it early. Report the displayed
-frame count and any USB packet errors. This checks USB delivery before
-connecting the output to Hamlib TX or testing modulation.
+advertised format, then runs a temporary dummy server on phone loopback port
+14533. An internal Hamlib client sends one second of silence through the TX
+stream, waits for USB completion and checks dummy PTT off. The output accepts
+only zero samples. **Stop monitor** cancels the check. Report the network
+frame count and any USB packet errors. This verifies the network and USB path
+with simulated PTT. Physical TX and modulation are separate hardware checks.
 
 To test shared receive audio on the FX-4CR, stop the short monitor, choose **USB serial** for CAT, and select **C-Media (`0d8c:013c`)**. Enable **Share selected USB audio (receive only)** and tap **Start**. Grant microphone and USB permissions if prompted. When status shows **C-Media USB receive ready**, a local Hamlib streaming client built from the pinned revision can request one 48 kHz mono PCM16 stream at `127.0.0.1:4532`. Confirm sample level changes with the FX-4CR AUX output and check CAT frequency readback on a second connection. On USB disconnect the client must stop using the stream. Reconnect the rig, refresh the ports and inputs, and restart the service. The client can reopen at the same address. JS8Android needs a rigctld audio adapter to consume this stream.
 

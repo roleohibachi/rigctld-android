@@ -132,10 +132,13 @@ The native server now has a host-only playback fixture that exercises the
 ownership and unkey rules against the Hamlib UDP feeder and TCP parser. The
 fixture covers pre-key audio rejection, a final UDP block arriving after
 the TCP unkey request, a disconnected owner, a failed sink, an audio stall,
-and a missing end-of-burst marker. The Android app's direct C-Media silence
-check verifies USB output independently. The next integration needs a
-bounded C-Media playback queue behind the server interface and a JS8Android
-client that sends PTT and the TX stream over the same Hamlib connection.
+and a missing end-of-burst marker. The Android silence check now runs an
+internal Hamlib client and dummy server on the phone. The Pixel 8a delivered
+all 48,000 silent network frames through the C-Media output and verified
+dummy PTT off. The next integration needs a C-Media buffer for modem
+samples and a JS8Android client that sends PTT and the TX stream over the
+same Hamlib connection. Verify the FX-4CR's physical modulation and unkey
+only with the owner's low-power dummy-load setup.
 
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
