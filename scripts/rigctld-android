@@ -50,6 +50,8 @@ def main():
     commands.add_parser("status", help="show current app and session status as JSON")
     commands.add_parser("list-devices", help="list serial ports and USB audio inputs as JSON")
     commands.add_parser("stop", help="request a graceful service stop")
+    commands.add_parser("trace-on", help="send Hamlib trace output to Android logcat")
+    commands.add_parser("trace-off", help="disable Hamlib trace output")
     start = commands.add_parser("start-rx", help="open a receive-only session")
     start.add_argument("transport", choices=("dummy", "usb", "bluetooth"))
     start.add_argument("--model", type=positive_int, help="Hamlib model ID")

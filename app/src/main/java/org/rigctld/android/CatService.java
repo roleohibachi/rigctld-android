@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public final class CatService extends Service {
+    static native void nativeDebugTrace(boolean enabled);
     static final String ACTION_STATUS = "org.rigctld.android.STATUS";
     static final String ACTION_STOP = "org.rigctld.android.STOP";
     static final String ENDPOINT = "127.0.0.1:4532";

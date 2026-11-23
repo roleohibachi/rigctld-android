@@ -27,6 +27,11 @@ public final class DebugCommandReceiver extends BroadcastReceiver {
                 result = status();
             } else if ("list-devices".equals(command)) {
                 result = devices(context);
+            } else if ("trace-on".equals(command) || "trace-off".equals(command)) {
+                System.loadLibrary("android_rigctld");
+                boolean enabled = "trace-on".equals(command);
+                CatService.nativeDebugTrace(enabled);
+                result = new JSONObject().put("hamlib_trace", enabled);
             } else if ("stop".equals(command)) {
                 boolean active = CatService.status().active;
                 if (active) {

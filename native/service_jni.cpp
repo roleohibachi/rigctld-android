@@ -4,8 +4,13 @@
 
 #include <jni.h>
 #include <new>
+#include <android/log.h>
+#include <hamlib/rig.h>
 
 namespace {
+int hamlib_log(enum rig_debug_level_e, rig_ptr_t, const char* format, va_list args) {
+    return __android_log_vprint(ANDROID_LOG_DEBUG, "RigctldHamlib", format, args);
+}
 class TruSdxRoute {
 public:
     explicit TruSdxRoute(embedded_audio* audio) : selected_(audio != nullptr) {
@@ -21,6 +26,12 @@ private:
 
 RigctldServer* server_from_handle(jlong handle) {
     return reinterpret_cast<RigctldServer*>(handle);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rigctld_android_CatService_nativeDebugTrace(JNIEnv*, jclass, jboolean enabled) {
+    rig_set_debug(enabled ? RIG_DEBUG_TRACE : RIG_DEBUG_NONE);
+    rig_set_debug_callback(enabled ? hamlib_log : nullptr, nullptr);
 }
 
 std::string string_from_java(JNIEnv* env, jstring value) {

@@ -136,6 +136,13 @@ ends early, preserve both apps' PTT results and the rig's TX indicator
 observation with `adb logcat -d -s RigctldUsbTx Js8RigctldTx JS8EngineService`.
 Resume in receive-only mode before collecting further diagnostics.
 
+For a Hamlib CAT transcript in a debug build, run
+`scripts/rigctld-android trace-on` before reproducing the failure, then
+capture `adb logcat -d -s RigctldHamlib RigctldUsbTx Js8RigctldTx` and run
+`scripts/rigctld-android trace-off`. Trace output includes raw CAT traffic.
+Review and sanitize logs before sharing them. Tracing is process-local and
+ends when Android stops the app.
+
 On 2026-11-23, the Pixel 8a on Android 17 (API 37) cancelled four in-flight
 C-Media transfers during the silent probe. In the separate FX-4CR bench
 attempt at the owner's 0.1 W setting into a dummy load, JS8Android accepted
@@ -143,6 +150,13 @@ one manual Turbo message and reported an error enabling PTT. The owner
 observed the rig's TX indicator for under one second. CAT read PTT off
 after the attempt, and the C-Media receive-only session was restored.
 A complete frame and RF drive remain unverified.
+
+A phone-side trace at Hamlib `af198ace7697c84f5d8ce084271208e383012792`
+showed the FX-4CR returning `TX1;` after Hamlib sent `TX1;` and its
+`ID;` verification query. The Kenwood backend expected an `ID` response,
+retried the command and returned protocol error -8. CAT read PTT off after
+the aborted test. Confirm the behavior with stock Hamlib on the same USB
+connection before preparing a Hamlib backend fix.
 
 ### Robot36 Playback Capture
 
