@@ -164,6 +164,11 @@ verification response. Hamlib again returned protocol error -8 and the
 frame aborted. CAT read PTT off afterward. The firmware version was not
 recorded.
 
+The pinned Hamlib build includes a temporary FX-4CR workaround that skips
+generic verification of `TX1;` for model 2053. CAT PTT-off readback is
+still checked after release. The owner plans to investigate the firmware
+and BG2FX backend; the workaround needs physical TX verification.
+
 ### Robot36 Playback Capture
 
 Put the radio in receive-only mode, then follow the shared receive setup above. Before tapping **Start**, also enable **Play receive audio for capture apps**. Wait for **Receive playback ready · phone speaker**. Rigctld starts with silence, checks the phone speaker route, and stops playback if Android changes it. The network stream can continue independently.

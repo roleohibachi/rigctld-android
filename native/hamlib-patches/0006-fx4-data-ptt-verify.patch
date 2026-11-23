@@ -1,0 +1,15 @@
+--- a/rigs/kenwood/kenwood.c
++++ b/rigs/kenwood/kenwood.c
+@@ -399,7 +399,11 @@
+     // The TS-2000 doesn't like doing an ID right after RU or RD
+     if (retval == RIG_OK)
+     {
+-        int skip = strncmp(cmdstr, "RX", 2) == 0;
++        // FX-4CR firmware can reply TX1; to the data PTT command. Its reply
++        // precedes the ID response used by generic Kenwood verification.
++        // Skip that verification for this model and command only.
++        int skip = rig->caps->rig_model == RIG_MODEL_FX4 && strcmp(cmdstr, "TX1") == 0;
++        skip |= strncmp(cmdstr, "RX", 2) == 0;
+         skip |= strncmp(cmdstr, "RU", 2) == 0;
+         skip |= strncmp(cmdstr, "RD", 2) == 0;
+         skip |= strncmp(cmdstr, "KYW", 3) == 0;

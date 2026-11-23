@@ -57,6 +57,7 @@ fi
 
 make -C "$build_dir/lib" -j"$jobs"
 make -C "$build_dir/security" -j"$jobs"
+make -C "$build_dir/rigs/kenwood" -j"$jobs"
 make -C "$build_dir/src" -j"$jobs"
 if [[ "${1:-host}" == host ]]; then
     make -C "$build_dir/tests" -j"$jobs" rigctl

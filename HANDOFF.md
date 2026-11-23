@@ -150,6 +150,16 @@ the next supervised attempt before changing CAT timing. RF drive and a
 complete frame still need verification.
 [Bench procedure](README.md#fx-4cr-usb-transmit-bench-check)
 
+The FX-4CR USB CAT trace at Hamlib `af198ace7697c84f5d8ce084271208e383012792`
+showed `TX1;` arriving ahead of the `ID;` response used by the Kenwood
+backend to verify data PTT. The backend retried and returned protocol error
+-8. The owner observed a brief key and CAT later read PTT off. The same
+result followed a firmware update, whose version was not recorded. The owner
+plans to discuss the behavior with F5BUD and later fix the firmware or
+BG2FX Hamlib backend. Patch `0006-fx4-data-ptt-verify.patch` temporarily
+skips generic command verification only for model FX4 and `TX1`. Confirm
+the resolution against stock Hamlib and remove the workaround when fixed.
+
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
 Use stock [GGMorse](https://play.google.com/store/apps/details?id=com.ggerganov.GGMorse) to test apps that use the default recording input. On the Pixel 8a, connect the FX-4CR over USB, leave Android rigctld in CAT-only mode with PTT disabled, and close other audio capture apps. Tune to readable CW and open GGMorse with microphone permission. While it decodes, use `adb shell dumpsys media.audio_policy` and `adb shell dumpsys audio` to check the active recording route. Count this as verified only if GGMorse decodes CW and the active input is the rig's USB audio device. Record the Android build, app version, and route. Repeat with Bluetooth once its audio profile is known.
