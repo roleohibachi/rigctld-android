@@ -2,6 +2,7 @@
 package org.rigctld.android;
 
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbConstants;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbEndpoint;
 import android.hardware.usb.UsbInterface;
@@ -38,7 +39,19 @@ final class UsbAudioMonitor {
 
     static String capture(UsbManager manager, UsbDevice device, AtomicBoolean cancelled,
                           Consumer<String> update, long server, ReceivePlayback playback) {
-        Format format = format(device);
+        return transfer(manager, device, cancelled, update, server, playback, false);
+    }
+
+    static String checkSilentOutput(UsbManager manager, UsbDevice device, AtomicBoolean cancelled) {
+        if (!supportsRxStream(device)) return "Select the C-Media USB audio device.";
+        return transfer(manager, device, cancelled, null, 0, null, true);
+    }
+
+    private static String transfer(UsbManager manager, UsbDevice device, AtomicBoolean cancelled,
+                                   Consumer<String> update, long server, ReceivePlayback playback,
+                                   boolean output) {
+        Format format = output ? new Format(1, 0x01, 2, true) : format(device);
+        String direction = output ? "playback" : "capture";
         if (format == null) return "This USB input does not have a monitor format yet.";
         UsbInterface idle = null;
         UsbInterface stream = null;
@@ -50,32 +63,43 @@ final class UsbAudioMonitor {
             if (candidate.getAlternateSetting() != 1) continue;
             for (int j = 0; j < candidate.getEndpointCount(); j++) {
                 UsbEndpoint candidateEndpoint = candidate.getEndpoint(j);
-                if (candidateEndpoint.getAddress() == format.endpointAddress()
-                        && UsbAudioInputs.isCaptureEndpoint(candidate, candidateEndpoint)) {
+                boolean matches = output
+                    ? candidate.getInterfaceClass() == UsbConstants.USB_CLASS_AUDIO
+                        && candidate.getInterfaceSubclass() == 2
+                        && candidateEndpoint.getType() == UsbConstants.USB_ENDPOINT_XFER_ISOC
+                        && candidateEndpoint.getInterval() == 1
+                        && candidateEndpoint.getMaxPacketSize() >= 192
+                    : UsbAudioInputs.isCaptureEndpoint(candidate, candidateEndpoint);
+                if (candidateEndpoint.getAddress() == format.endpointAddress() && matches) {
                     stream = candidate;
                     endpoint = candidateEndpoint;
                     break;
                 }
             }
         }
-        if (idle == null || endpoint == null) return "Expected USB capture endpoint was not found.";
+        if (idle == null || endpoint == null) return "Expected USB " + direction + " endpoint was not found.";
         if (cancelled.get()) return "Monitor stopped.";
         UsbDeviceConnection connection = manager.openDevice(device);
-        if (connection == null) return "Could not open the selected USB input.";
+        if (connection == null) return "Could not open the selected USB device.";
         try {
-            if (!connection.claimInterface(stream, true)) return "Could not claim the USB capture interface.";
+            if (output && !hasStereoOutputFormat(connection.getRawDescriptors())) {
+                return "USB playback does not advertise 48 kHz stereo PCM16.";
+            }
+            if (!connection.claimInterface(stream, true)) return "Could not claim the USB " + direction + " interface.";
             try {
-                if (!connection.setInterface(stream)) return "Could not start the USB capture interface.";
+                if (cancelled.get()) return "Monitor stopped.";
+                if (!connection.setInterface(stream)) return "Could not start the USB " + direction + " interface.";
                 if (format.setSampleRate()) {
                     // UAC1 SET_CUR sampling frequency control on the capture endpoint.
                     byte[] rate = {(byte) SAMPLE_RATE, (byte) (SAMPLE_RATE >> 8), 0};
                     int result = connection.controlTransfer(0x22, 0x01, 0x0100,
                         endpoint.getAddress(), rate, rate.length, 500);
-                    if (result != rate.length) return "Could not set the USB input to 48 kHz (" + result + ").";
+                    if (result != rate.length) return "Could not set USB " + direction + " to 48 kHz (" + result + ").";
                 }
                 System.loadLibrary("android_rigctld");
                 return nativeMeasure(connection.getFileDescriptor(), endpoint.getAddress(),
-                    endpoint.getMaxPacketSize(), format.channels(), cancelled, update, server, playback);
+                    output ? 192 : endpoint.getMaxPacketSize(), format.channels(),
+                    cancelled, update, server, playback);
             } finally {
                 connection.setInterface(idle);
                 connection.releaseInterface(stream);
@@ -83,6 +107,44 @@ final class UsbAudioMonitor {
         } finally {
             connection.close();
         }
+    }
+
+    private static boolean hasStereoOutputFormat(byte[] descriptors) {
+        if (descriptors == null) return false;
+        boolean output = false;
+        boolean pcm = false;
+        for (int offset = 0; offset + 2 <= descriptors.length;) {
+            int length = descriptors[offset] & 0xff;
+            if (length < 2 || length > descriptors.length - offset) return false;
+            int type = descriptors[offset + 1] & 0xff;
+            if (type == 4) {
+                output = length >= 9 && descriptors[offset + 2] == 1
+                    && descriptors[offset + 3] == 1 && descriptors[offset + 5] == 1
+                    && descriptors[offset + 6] == 2;
+                pcm = false;
+            } else if (output && type == 0x24 && length >= 7) {
+                int subtype = descriptors[offset + 2] & 0xff;
+                if (subtype == 1) pcm = descriptors[offset + 5] == 1 && descriptors[offset + 6] == 0;
+                if (subtype == 2 && pcm && length >= 8 && descriptors[offset + 3] == 1
+                        && descriptors[offset + 4] == 2 && descriptors[offset + 5] == 2
+                        && descriptors[offset + 6] == 16) {
+                    int count = descriptors[offset + 7] & 0xff;
+                    if (count == 0 && length >= 14) {
+                        return rateAt(descriptors, offset + 8) <= SAMPLE_RATE
+                            && rateAt(descriptors, offset + 11) >= SAMPLE_RATE;
+                    }
+                    for (int index = 0; index < count && 8 + 3 * (index + 1) <= length; index++) {
+                        if (rateAt(descriptors, offset + 8 + 3 * index) == SAMPLE_RATE) return true;
+                    }
+                }
+            }
+            offset += length;
+        }
+        return false;
+    }
+
+    private static int rateAt(byte[] bytes, int offset) {
+        return (bytes[offset] & 0xff) | ((bytes[offset + 1] & 0xff) << 8) | ((bytes[offset + 2] & 0xff) << 16);
     }
 
     private static native String nativeMeasure(int fd, int endpoint, int packetSize, int channels,

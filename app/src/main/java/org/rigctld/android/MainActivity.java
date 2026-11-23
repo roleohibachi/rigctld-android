@@ -53,6 +53,8 @@ public final class MainActivity extends Activity {
     private TextView usbAudioDetails;
     private TextView usbAudioStatus;
     private Button monitorAudio;
+    private Button checkUsbOutput;
+    private boolean pendingOutputCheck;
     private Button refreshAudio;
     private CheckBox shareAudio;
     private CheckBox receivePlayback;
@@ -268,6 +270,16 @@ public final class MainActivity extends Activity {
             }
         });
         content.addView(monitorAudio);
+        checkUsbOutput = new Button(this);
+        checkUsbOutput.setText("Check USB output (silence)");
+        checkUsbOutput.setOnClickListener(view -> {
+            UsbDevice device = selectedAudioDevice();
+            if (!CatService.status().active && UsbAudioMonitor.supportsRxStream(device)) {
+                pendingOutputCheck = true;
+                requestAudioPermissions(device, null);
+            }
+        });
+        content.addView(checkUsbOutput);
         usbAudioStatus = new TextView(this);
         usbAudioStatus.setTextIsSelectable(true);
         content.addView(usbAudioStatus);
@@ -305,6 +317,8 @@ public final class MainActivity extends Activity {
         monitorAudio.setText(running ? "Stop monitor" : "Monitor");
         monitorAudio.setEnabled(running ? !monitorCancelled.get()
             : available && UsbAudioMonitor.supports(selectedAudioDevice()));
+        checkUsbOutput.setEnabled(available && !state.active && awaitingUsbPermission == null
+            && UsbAudioMonitor.supportsRxStream(selectedAudioDevice()));
         boolean usbSelected = transport.getSelectedItemPosition() == RadioSelection.USB;
         boolean trusdx = isTruSdxUsb();
         shareAudio.setText(trusdx ? "Share (tr)uSDX serial audio (receive only)" : "Share selected USB audio (receive only)");
@@ -359,6 +373,7 @@ public final class MainActivity extends Activity {
     private void finishAudioPermission(String message) {
         pendingAudioDevice = null;
         pendingAudioRadio = null;
+        pendingOutputCheck = false;
         usbAudioStatus.setText(message);
         render();
     }
@@ -372,10 +387,16 @@ public final class MainActivity extends Activity {
             return;
         }
         RadioSelection radio = pendingAudioRadio;
+        boolean output = pendingOutputCheck;
         pendingAudioDevice = null;
         pendingAudioRadio = null;
+        pendingOutputCheck = false;
         if (radio != null) {
             startServiceForRadio(radio);
+            return;
+        }
+        if (output && CatService.status().active) {
+            finishAudioPermission("Stop rigctld before checking USB output.");
             return;
         }
         UsbAudioInputs.Input input = (UsbAudioInputs.Input) usbAudioInputs.getSelectedItem();
@@ -383,12 +404,13 @@ public final class MainActivity extends Activity {
         AtomicBoolean cancelled = new AtomicBoolean();
         monitorCancelled = cancelled;
         audioMonitorReport = "";
-        usbAudioStatus.setText(label + "\nOpening USB input…");
+        usbAudioStatus.setText(label + (output ? "\nOpening USB output for silence check…" : "\nOpening USB input…"));
         render();
         new Thread(() -> {
             String outcome;
             try {
-                outcome = UsbAudioMonitor.measure(manager, device, cancelled, progress -> runOnUiThread(() -> {
+                outcome = output ? UsbAudioMonitor.checkSilentOutput(manager, device, cancelled)
+                    : UsbAudioMonitor.measure(manager, device, cancelled, progress -> runOnUiThread(() -> {
                     if (!isDestroyed() && monitorCancelled == cancelled && !cancelled.get()) {
                         usbAudioStatus.setText(label + "\n" + progress);
                     }

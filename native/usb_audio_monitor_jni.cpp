@@ -92,10 +92,12 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     jobject cancelled, jobject update, jlong server_handle, jobject playback) {
     auto* server = reinterpret_cast<RigctldServer*>(server_handle);
     auto* audio = server ? server->audio() : nullptr;
+    const bool silent_output = endpoint == 0x01 && packet_size == 192 && channels == 2
+        && !server && !playback && !update;
     if (fd < 0 || packet_size <= 0 || packet_size > max_packet_size
-        || (channels != 1 && channels != 2) || endpoint < 0x81 || endpoint > 0x8f
+        || (channels != 1 && channels != 2) || (!silent_output && (endpoint < 0x81 || endpoint > 0x8f))
         || (server && (!audio || channels != 1))) {
-        return env->NewStringUTF("Invalid USB capture parameters.");
+        return env->NewStringUTF("Invalid USB audio parameters.");
     }
     jmethodID get = env->GetMethodID(env->GetObjectClass(cancelled), "get", "()Z");
     if (!get) return nullptr;
@@ -116,9 +118,10 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
 
     TransferQueue queue{fd, {}};
     int error = 0;
-    const char* operation = "queue capture";
+    const char* operation = "queue USB audio";
     for (auto& transfer : queue.transfers) {
         if (!transfer.urb) return env->NewStringUTF("Could not allocate USB transfer buffers.");
+        if (silent_output) transfer.bytes.fill(0);
         auto& urb = *transfer.urb;
         urb.type = USBDEVFS_URB_TYPE_ISO;
         urb.endpoint = endpoint;
@@ -137,27 +140,28 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     int packets = 0;
     int packet_errors = 0;
     const auto start = Clock::now();
-    const auto end = audio ? Clock::time_point::max() : start + 5s;
+    const auto end = audio ? Clock::time_point::max() : start + (silent_output ? 2s : 5s);
     auto last_frames = start;
     auto next_update = start + 250ms;
     bool reported_ready = false;
     char message[256];
     while (error == 0 && Clock::now() < end && !is_cancelled(env, cancelled, get)) {
-        if (audio && Clock::now() - last_frames > 2s) {
-            operation = "receive frames";
+        if ((audio && Clock::now() - last_frames > 2s)
+            || (silent_output && Clock::now() - last_frames > 250ms)) {
+            operation = silent_output ? "complete USB output frames" : "receive frames";
             error = ETIMEDOUT;
             break;
         }
         pollfd waiter{fd, POLLOUT, 0};
         int ready = poll(&waiter, 1, 100);
         if (ready == 0 || (ready < 0 && errno == EINTR)) continue;
-        operation = "wait for capture";
+        operation = "wait for USB audio";
         if (ready < 0) {
             error = errno;
             break;
         }
         usbdevfs_urb* completed = nullptr;
-        operation = "read capture";
+        operation = "reap USB audio";
         if (usb_ioctl(fd, USBDEVFS_REAPURBNDELAY, &completed) < 0) {
             if (errno == EAGAIN && !(waiter.revents & (POLLERR | POLLHUP | POLLNVAL))) continue;
             error = errno == EAGAIN ? ENODEV : errno;
@@ -173,6 +177,12 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         for (int i = 0; i < packets_per_transfer; ++i) {
             const auto& packet = completed->iso_frame_desc[i];
             if (!audio) ++packets;
+            if (silent_output && (packet.status != 0
+                    || packet.actual_length != static_cast<unsigned>(packet_size))) {
+                ++packet_errors;
+                error = packet.status < 0 ? -packet.status : EIO;
+                break;
+            }
             if (packet.status != 0 || packet.actual_length > static_cast<unsigned>(packet_size)
                 || packet.actual_length % (channels * 2) != 0) {
                 if (!audio) ++packet_errors;
@@ -189,8 +199,10 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
             } else if (!audio) {
                 total.add(data, packet.actual_length, channels);
                 recent.add(data, packet.actual_length, channels);
+                if (silent_output) last_frames = Clock::now();
             }
         }
+        if (error) break;
         if (playback_bytes > 0) {
             env->CallVoidMethod(playback, play, playback_samples, playback_bytes);
             if (env->ExceptionCheck()) return nullptr;
@@ -212,12 +224,13 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
             recent = {};
             next_update += 250ms;
         }
-        operation = "queue capture";
+        operation = "queue USB audio";
         error = queue.submit(transfer);
     }
     if (env->ExceptionCheck()) return nullptr;
-    if (!audio && error == 0 && total.frames == 0 && !is_cancelled(env, cancelled, get)) {
-        operation = "receive frames";
+    const int minimum_frames = silent_output ? 72000 : 1;
+    if (!audio && error == 0 && total.frames < minimum_frames && !is_cancelled(env, cancelled, get)) {
+        operation = silent_output ? "complete USB output frames" : "receive frames";
         error = ETIMEDOUT;
     }
     char status[80];
@@ -225,6 +238,8 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         std::snprintf(status, sizeof(status), "Could not %s (USB error %d).", operation, error);
     } else if (is_cancelled(env, cancelled, get)) {
         std::snprintf(status, sizeof(status), "Monitor stopped.");
+    } else if (silent_output) {
+        std::snprintf(status, sizeof(status), "Silent USB output completed.");
     } else {
         std::snprintf(status, sizeof(status), "%s", total.nonzero == 0 ? "All samples were zero." : "Samples received.");
     }

@@ -24,6 +24,8 @@ The owner confirmed that the USB audio diagnostics picker from `5a5cda7` lists b
 
 On 2026-11-23, the Pixel 8a on Android 17 (API 37) enumerated playback endpoints on both FX-4CR USB audio devices. At the time of the check, Android audio policy exposed QCC3024 (`0a12:4007`, interface 2 alternate 1, endpoint `0x03` OUT) as the only selectable USB playback route. C-Media (`0d8c:013c`, interface 1 alternate 1, endpoint `0x01` OUT) had appeared briefly in the route log during attachment. A separate muted `AudioTrack` probe held the QCC3024 route and its playback head advanced from 30,720 to 82,560 frames at 48 kHz stereo PCM16. The probe sent only zero samples. No PTT command was sent and the subsequent CAT PTT readback was `0`. The owner reported a 0.1 W setting and a dummy load limited to 1 W. Radio modulation and USB route-loss handling remain unverified. Compare `adb shell dumpsys usb` and `adb shell dumpsys media.audio_policy` to reproduce the device and policy inventory.
 
+The direct C-Media output check on the same setup completed 96,384 all-zero stereo PCM16 frames at 48 kHz with zero USB packet errors out of 2,008 packets. A second check stopped on request after 25,728 all-zero frames with zero packet errors. The checks ran with the CAT service stopped. Afterward, C-Media receive sharing resumed, JS8Android reconnected, and CAT again reported PTT off.
+
 The Docker host suite verifies 48 kHz mono PCM16 over IPv4 loopback UDP from the embedded dummy rig and from a per-session provider fed a known sample pattern. Both answer CAT on a second TCP connection. The tests also cover stream ownership, disconnect cleanup, multicast rejection, and TX rejection for ordinary sessions. Run them with `bash scripts/docker-build.sh test`.
 
 The host test runner has an explicit `dummy-tx-loopback` mode. Hamlib routes
@@ -76,6 +78,13 @@ The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. It targets ARM64 d
 To compare the FX-4CR's inputs on Android, close other audio apps, connect the rig by USB, keep CAT PTT off and tune to a readable signal. Tap **Refresh USB audio inputs**, select C-Media (`0d8c:013c`), and tap **Monitor**. Grant the microphone and USB permissions if prompted. Android requires microphone permission for direct access to a USB audio capture device.
 
 The monitor claims the selected USB capture interface for five seconds and displays live peak/RMS levels and a summary of frames, nonzero samples and USB packet errors. It releases the interface when the test ends. Repeat on a quiet frequency to check whether levels respond to reception. Repeat on QCC3024 (`0a12:4007`) for comparison. **Copy diagnostics** includes the most recent result and the detected endpoints. If CAT is running, confirm a frequency read still works during capture. After an unplug/replug, refresh the list and repeat on C-Media. This monitor uses direct USB Audio Class capture for the two FX-4CR interfaces and displays levels locally.
+
+To check the C-Media output with no RF, stop rigctld, select C-Media
+(`0d8c:013c`), and tap **Check USB output (silence)**. It checks the
+advertised format and sends two seconds of zero samples directly to the USB
+playback interface. **Stop monitor** cancels it early. Report the displayed
+frame count and any USB packet errors. This checks USB delivery before
+connecting the output to Hamlib TX or testing modulation.
 
 To test shared receive audio on the FX-4CR, stop the short monitor, choose **USB serial** for CAT, and select **C-Media (`0d8c:013c`)**. Enable **Share selected USB audio (receive only)** and tap **Start**. Grant microphone and USB permissions if prompted. When status shows **C-Media USB receive ready**, a local Hamlib streaming client built from the pinned revision can request one 48 kHz mono PCM16 stream at `127.0.0.1:4532`. Confirm sample level changes with the FX-4CR AUX output and check CAT frequency readback on a second connection. On USB disconnect the client must stop using the stream. Reconnect the rig, refresh the ports and inputs, and restart the service. The client can reopen at the same address. JS8Android needs a rigctld audio adapter to consume this stream.
 
