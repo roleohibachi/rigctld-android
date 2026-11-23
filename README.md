@@ -158,6 +158,12 @@ retried the command and returned protocol error -8. CAT read PTT off after
 the aborted test. Confirm the behavior with stock Hamlib on the same USB
 connection before preparing a Hamlib backend fix.
 
+After an owner-reported firmware update on 2026-11-23, the same USB
+single-frame test still returned `TX1;` while Hamlib expected its `ID;`
+verification response. Hamlib again returned protocol error -8 and the
+frame aborted. CAT read PTT off afterward. The firmware version was not
+recorded.
+
 ### Robot36 Playback Capture
 
 Put the radio in receive-only mode, then follow the shared receive setup above. Before tapping **Start**, also enable **Play receive audio for capture apps**. Wait for **Receive playback ready · phone speaker**. Rigctld starts with silence, checks the phone speaker route, and stops playback if Android changes it. The network stream can continue independently.
