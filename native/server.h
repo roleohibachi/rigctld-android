@@ -7,6 +7,8 @@
 #include <string>
 #include "embedded_audio.h"
 
+class TxPlayback;
+
 class RigctldServer {
 public:
     struct Radio {
@@ -18,6 +20,7 @@ public:
         bool enforce_radio_policy = false;
         bool usb_audio_rx = false;
         bool dummy_tx_loopback = false;
+        TxPlayback* tx_playback = nullptr;
     };
 
     RigctldServer();

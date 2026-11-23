@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "server.h"
+#include "tx_stream.h"
 
 #include <array>
 #include <algorithm>
@@ -72,12 +73,14 @@ struct Client {
 
 struct RadioControl {
     const RigctldServer::Radio& radio;
+    TxStream* tx = nullptr;
     Client* ptt_owner = nullptr;
     vfo_t ptt_vfo = RIG_VFO_CURR;
     std::chrono::steady_clock::time_point ptt_deadline{};
 
     int release(RIG* rig) {
         if (!ptt_owner) return RIG_OK;
+        if (tx) tx->finish(false);
         const int result = rig_set_ptt(rig, ptt_vfo, RIG_PTT_OFF);
         if (result == RIG_OK) ptt_owner = nullptr;
         return result;
@@ -158,7 +161,8 @@ bool dummy_tx_loopback(const RigctldServer::Radio& radio) {
 }
 
 extern "C" int rigctld_embedded_allow_audio_tx(void) {
-    return current_command != nullptr && dummy_tx_loopback(current_command->control.radio);
+    return current_command != nullptr && (current_command->control.tx
+        || dummy_tx_loopback(current_command->control.radio));
 }
 
 extern "C" int rigctld_embedded_authorize(const char* command, const char* argument, vfo_t vfo) {
@@ -168,9 +172,9 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
     auto& [control, client] = *current_command;
     if (name.substr(0, 7) == "stream_") {
         return ((control.radio.model == RIG_MODEL_DUMMY && control.radio.path.empty())
-            || control.radio.usb_audio_rx) ? RIG_OK : -RIG_ENAVAIL;
+            || control.radio.usb_audio_rx || control.tx) ? RIG_OK : -RIG_ENAVAIL;
     }
-    if (control.radio.path.empty() && !control.radio.enforce_radio_policy) return RIG_OK;
+    if (control.radio.path.empty() && !control.radio.enforce_radio_policy && !control.tx) return RIG_OK;
 
     // Physical radios expose the CAT operations modem clients need. Raw CAT,
     // configuration writes and independent keying paths remain disabled.
@@ -191,14 +195,18 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
         return -RIG_EINVAL;
     }
     if (argument[0] == '0') {
-        return control.ptt_owner == nullptr || vfo == control.ptt_vfo ? RIG_OK : -RIG_EACCESS;
+        if (control.ptt_owner != nullptr && vfo != control.ptt_vfo) return -RIG_EACCESS;
+        if (control.tx && control.ptt_owner) control.tx->finish(control.ptt_owner == &client);
+        return RIG_OK;
     }
     if (!control.radio.allow_ptt || (control.ptt_owner != nullptr &&
         (control.ptt_owner != &client || vfo != control.ptt_vfo))) {
         return -RIG_EACCESS;
     }
+    if (control.tx && !control.tx->canKey(client.socket.get())) return -RIG_EACCESS;
     if (control.ptt_owner == nullptr) {
-        control.ptt_deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
+        control.ptt_deadline = std::chrono::steady_clock::now()
+            + (control.tx ? std::chrono::seconds(35) : std::chrono::minutes(3));
         control.ptt_vfo = vfo;
         // A failed reply can still mean the rig keyed. Keep ownership until an
         // explicit unkey succeeds or the service attempts recovery.
@@ -208,8 +216,13 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
 }
 
 extern "C" void rigctld_embedded_completed(const char* command, const char* argument, int result) {
-    if (result == RIG_OK && std::string_view(command) == "set_ptt" && argument && argument[0] == '0') {
-        current_command->control.ptt_owner = nullptr;
+    if (std::string_view(command) != "set_ptt" || !argument) return;
+    auto& [control, client] = *current_command;
+    if (result == RIG_OK && argument[0] == '0') {
+        control.ptt_owner = nullptr;
+    } else if (control.tx) {
+        if (result == RIG_OK) control.tx->keyed(client.socket.get());
+        else control.tx->finish(false);
     }
 }
 
@@ -254,7 +267,11 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
     if (open_status != RIG_OK) return std::string("Open Hamlib rig: ") + rigerror(open_status);
 
     std::string error;
-    if (radio.usb_audio_rx && embedded_audio_attach(audio_, rig.get()) != RIG_OK) {
+    std::unique_ptr<TxStream> tx;
+    if (radio.tx_playback) tx = std::make_unique<TxStream>(rig.get(), *radio.tx_playback);
+    if (tx && (radio.usb_audio_rx || radio.dummy_tx_loopback || tx->attach() != RIG_OK)) {
+        error = "Attach USB transmit audio";
+    } else if (radio.usb_audio_rx && embedded_audio_attach(audio_, rig.get()) != RIG_OK) {
         error = "Attach USB receive audio";
     } else if (listen(listener.get(), static_cast<int>(max_clients)) != 0) {
         error = system_error("Listen on CAT socket");
@@ -264,7 +281,7 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
         if (!stopping_) on_listening();
         std::array<Client, max_clients> clients;
         std::array<pollfd, max_clients + 1> descriptors{};
-        RadioControl control{radio};
+        RadioControl control{radio, tx.get()};
         auto next_audio_poll = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         while (!stopping_) {
             if (radio.model == RIG_MODEL_TRUSDX && radio.usb_audio_rx
@@ -275,9 +292,10 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
                 rig_get_freq(rig.get(), RIG_VFO_CURR, &frequency);
                 next_audio_poll = std::chrono::steady_clock::now() + std::chrono::seconds(2);
             }
-            if (control.ptt_owner && std::chrono::steady_clock::now() >= control.ptt_deadline) {
+            if (control.ptt_owner && (std::chrono::steady_clock::now() >= control.ptt_deadline
+                                     || (tx && !tx->healthy()))) {
                 if (control.release(rig.get()) != RIG_OK) {
-                    error = "PTT timeout. Unable to confirm release";
+                    error = "TX ended. Unable to confirm PTT release";
                     break;
                 }
             }
@@ -301,7 +319,9 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
                 if (events == 0) continue;
                 auto& client = clients[i];
                 bool keep = false;
-                if (events & POLLOUT) {
+                if (tx && control.ptt_owner == &client && (events & (POLLHUP | POLLERR | POLLNVAL))) {
+                    keep = false;
+                } else if (events & POLLOUT) {
                     keep = write_reply(client);
                 } else if (events & POLLIN) {
                     keep = read_command(rig.get(), client, control);
@@ -332,6 +352,7 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
         if (control.release(rig.get()) != RIG_OK) error = "Unable to confirm PTT release";
         embedded_stream_stop();
     }
+    tx.reset();
     rig_close(rig.get());
     return error;
 }

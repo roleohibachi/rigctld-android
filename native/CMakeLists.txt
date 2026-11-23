@@ -25,6 +25,7 @@ endif()
 find_package(Threads REQUIRED)
 add_library(rigctld_core STATIC
     server.cpp
+    tx_stream.cpp
     embedded_audio.c
     embedded_stream.c
     "${HAMLIB_SOURCE}/tests/rigctl_parse.c"

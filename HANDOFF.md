@@ -128,6 +128,15 @@ Qualify the physical output route, shared TX/PTT ownership, normal drain
 and abort on failure before enabling TX for a radio.
 [Software-only test commands](README.md#verification-status)
 
+The native server now has a host-only playback fixture that exercises the
+ownership and unkey rules against the Hamlib UDP feeder and TCP parser. The
+fixture covers pre-key audio rejection, a final UDP block arriving after
+the TCP unkey request, a disconnected owner, a failed sink, an audio stall,
+and a missing end-of-burst marker. The Android app's direct C-Media silence
+check verifies USB output independently. The next integration needs a
+bounded C-Media playback queue behind the server interface and a JS8Android
+client that sends PTT and the TX stream over the same Hamlib connection.
+
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
 Use stock [GGMorse](https://play.google.com/store/apps/details?id=com.ggerganov.GGMorse) to test apps that use the default recording input. On the Pixel 8a, connect the FX-4CR over USB, leave Android rigctld in CAT-only mode with PTT disabled, and close other audio capture apps. Tune to readable CW and open GGMorse with microphone permission. While it decodes, use `adb shell dumpsys media.audio_policy` and `adb shell dumpsys audio` to check the active recording route. Count this as verified only if GGMorse decodes CW and the active input is the rig's USB audio device. Record the Android build, app version, and route. Repeat with Bluetooth once its audio profile is known.

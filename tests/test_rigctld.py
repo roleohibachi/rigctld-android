@@ -124,6 +124,108 @@ class RigctldTests(unittest.TestCase):
             self.assertRegex(reply.readline(), rb"^RPRT -[0-9]+\n$")
             self.assertEqual(reply.readline(), b"0\n")
 
+    def stream_command(self, connection, reply, command):
+        connection.sendall(b"+\\" + command + b"\n")
+        self.assertTrue(reply.readline().startswith(command.split(b" ")[0] + b":"))
+        fields = {}
+        while True:
+            line = reply.readline().strip()
+            self.assertTrue(line, "Stream command ended without a result")
+            if line.startswith(b"RPRT "):
+                return line, fields
+            key, value = line.split(b": ", 1)
+            fields[key] = value
+
+    def tx_test_sender(self, owner, reply, audio):
+        result, fields = self.stream_command(owner, reply, b"stream_open AUDIO_TX PCM_S16 48000 channels=1")
+        self.assertEqual(result, b"RPRT 0")
+        stream_id = int(fields[b"stream_id"])
+        token = int(fields[b"subscribe_token"])
+        audio.connect(("127.0.0.1", int(fields[b"udp_port"])))
+        sequence = 0
+        timestamp = 0
+
+        def send(pcm, wait=True, end=False):
+            nonlocal sequence, timestamp
+            prefix = struct.pack("!QQBBBB", 0, 0, 0, 0x10, 0, 0) if end else b""
+            control = 0x20 if end else 0
+            header = STREAM_HEADER.pack(1, 0, stream_id, token, sequence, timestamp, 48000, 2, 1, 0,
+                                        control, len(prefix) + len(pcm))
+            audio.send(header + prefix + pcm)
+            sequence += 1
+            timestamp += len(pcm) // 2
+            if not wait:
+                return
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                result, status = self.stream_command(owner, reply, f"stream_status {stream_id}".encode())
+                self.assertEqual(result, b"RPRT 0")
+                if int(status[b"packet_count"]) >= sequence:
+                    return
+                time.sleep(0.01)
+            self.fail("TX packet was not processed")
+
+        return send
+
+    def check_ptt_off(self, connection, reply):
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            connection.sendall(b"t\n")
+            if reply.readline() == b"0\n":
+                return
+            time.sleep(0.02)
+        self.fail("PTT did not release")
+
+    def check_playback_log(self, expected):
+        self.assertTrue(select([self.server.stdout], [], [], 2)[0], "Playback fixture reported no output")
+        self.assertEqual(self.server.stdout.readline().strip(), expected)
+
+    def test_tx_owner_can_drain_before_unkey(self):
+        self.restart_with_policy("tx-fixture")
+        with self.connect() as owner, owner.makefile("rb") as reply, self.connect() as other, \
+                other.makefile("rb") as other_reply, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as audio:
+            owner.sendall(b"T 1\n")
+            self.assertRegex(reply.readline(), rb"^RPRT -[0-9]+\n$")
+            send = self.tx_test_sender(owner, reply, audio)
+            send(b"\x11\x22")
+            other.sendall(b"T 1\n")
+            self.assertRegex(other_reply.readline(), rb"^RPRT -[0-9]+\n$")
+            owner.sendall(b"T 1\n")
+            self.assertEqual(reply.readline(), b"RPRT 0\n")
+            send(b"\x33\x44")
+            owner.sendall(b"T 0\n")
+            # TCP release can arrive before the final UDP packet.
+            time.sleep(0.02)
+            send(b"\x55\x66", wait=False, end=True)
+            self.assertEqual(reply.readline(), b"RPRT 0\n")
+            self.check_playback_log("Played 4 TX bytes")
+            self.check_ptt_off(other, other_reply)
+
+    def test_tx_discard_and_unkey_on_disconnect_or_route_failure(self):
+        for failure in ("disconnect", "route failure", "audio stall", "missing burst end"):
+            with self.subTest(failure=failure):
+                self.restart_with_policy("tx-fixture")
+                with self.connect() as other, other.makefile("rb") as other_reply, \
+                        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as audio:
+                    with self.connect() as owner, owner.makefile("rb") as reply:
+                        send = self.tx_test_sender(owner, reply, audio)
+                        owner.sendall(b"T 1\n")
+                        self.assertEqual(reply.readline(), b"RPRT 0\n")
+                        send(b"\x33\x44\x55\x66")
+                        if failure == "route failure":
+                            send(b"\xff\xff", wait=False)
+                        if failure == "missing burst end":
+                            owner.sendall(b"T 0\n")
+                            self.assertEqual(reply.readline(), b"RPRT 0\n")
+                        if failure != "disconnect":
+                            self.check_playback_log("Discarded 4 TX bytes")
+                            self.check_ptt_off(other, other_reply)
+                            owner.sendall(b"T 1\n")
+                            self.assertRegex(reply.readline(), rb"^RPRT -[0-9]+\n$")
+                    if failure == "disconnect":
+                        self.check_playback_log("Discarded 4 TX bytes")
+                        self.check_ptt_off(other, other_reply)
+
     def test_session_audio_provider_with_concurrent_cat(self):
         self.restart_with_policy("audio-fixture")
         self.check_receive_stream_with_cat(sample=1234)

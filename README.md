@@ -56,6 +56,16 @@ adb shell /data/local/tmp/rigctld-dummy-test-server 14532 dummy-tx-loopback
 Keep the last command running while the Android client test runs. Both TCP
 and UDP stay on the test device's loopback interface.
 
+The Docker host suite also exercises a playback fixture with simulated PTT.
+One TCP client owns both its 48 kHz mono PCM16 audio stream and PTT, and
+audio starts flowing to the sink after a successful key command. For normal
+completion, the client marks its final UDP block with Hamlib's end-of-burst
+flag and sends PTT off on the same connection. The server waits briefly for
+the final block before requesting a bounded drain. Disconnect, playback
+failure, missing end-of-burst, or stalled audio discards pending samples
+and releases PTT in the fixture. The physical USB output and the normal
+JS8Android transmit controls still need to be connected to this path.
+
 On the Pixel 8a, build `df54398` streamed FX-4CR C-Media audio to the pinned Hamlib `rigstreamtest` client on loopback. During a five-second 48 kHz mono float32 receive test, the client reported 915,396 bytes, nonzero levels and zero gaps, overruns and underruns. A concurrent CAT frequency query returned 7,046,700 Hz. A second client connection opened native PCM16 and reported 255,728 bytes with zero gaps over three seconds. The pinned diagnostic client logs a warning when it parses the extended `stream_caps:` response header and uses float32 to display levels even for PCM16. Measure levels in its default float32 mode. USB reconnect and JS8Android decoding through the stream are still pending.
 
 The owner reported that Robot36 Playback Test (`2af2390`) successfully received FX-4CR audio through rigctld's Playback Capture bridge (`845953a`) on the Pixel 8a. SSTV image decoding was not reported. The test APK was installed alongside the stock Robot36 release.
