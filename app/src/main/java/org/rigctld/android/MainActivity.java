@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.js8call.core.BluetoothSerialPortCatalog;
 import com.js8call.core.UsbSerialPortCatalog;
 
-public final class MainActivity extends Activity {
+public class MainActivity extends Activity {
     private static final String USB_PERMISSION = "org.rigctld.android.USB_PERMISSION";
     private static final String USB_AUDIO_PERMISSION = "org.rigctld.android.USB_AUDIO_PERMISSION";
     private static final int RECORD_AUDIO_REQUEST = 2;
@@ -358,6 +358,7 @@ public final class MainActivity extends Activity {
         pendingAudioDevice = device;
         pendingAudioRadio = radio;
         render();
+        if (radio != null) onRadioStartProgress("Checking microphone and USB audio permissions", StartProgress.WAITING);
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO_REQUEST);
         } else {
@@ -382,6 +383,7 @@ public final class MainActivity extends Activity {
     }
 
     private void finishAudioPermission(String message) {
+        if (pendingAudioRadio != null) onRadioStartProgress(message, StartProgress.FAILED);
         pendingAudioDevice = null;
         pendingAudioRadio = null;
         pendingOutputCheck = false;
@@ -578,16 +580,28 @@ public final class MainActivity extends Activity {
             .filter(device -> device.getDeviceId() == deviceId).findFirst().orElse(null);
         if (selected == null) {
             selectionMessage.setText("USB device disconnected. Refresh ports.");
+            onRadioStartProgress("USB serial device disconnected. List devices again.", StartProgress.FAILED);
         } else if (manager.hasPermission(selected)) {
             start(selection);
         } else {
             awaitingUsbPermission = selection;
+            onRadioStartProgress("Waiting for USB serial permission", StartProgress.WAITING);
             render();
             PendingIntent result = PendingIntent.getBroadcast(this, 0,
                 new Intent(USB_PERMISSION).setPackage(getPackageName()),
                 PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_MUTABLE);
             manager.requestPermission(selected, result);
         }
+    }
+
+    final void startReceiveOnly(RadioSelection selection, int deviceId) {
+        if (selection.allowPtt || !selection.valid()) {
+            throw new IllegalArgumentException("Invalid receive-only rig configuration");
+        }
+        if (!start.isEnabled() || CatService.status().active) {
+            throw new IllegalStateException("Stop the current session or finish the permission prompt first");
+        }
+        startWithPermission(selection, deviceId);
     }
 
     private void onUsbPermission() {
@@ -602,6 +616,7 @@ public final class MainActivity extends Activity {
             }
         }
         selectionMessage.setText("USB permission was not granted. Select Start to retry.");
+        onRadioStartProgress("USB serial permission was not granted", StartProgress.FAILED);
         render();
     }
 
@@ -610,6 +625,7 @@ public final class MainActivity extends Activity {
             UsbDevice audio = getSystemService(UsbManager.class).getDeviceList().get(selection.usbAudioPath);
             if (!UsbAudioMonitor.supportsRxStream(audio)) {
                 selectionMessage.setText("USB audio disconnected. Refresh USB audio inputs.");
+                onRadioStartProgress("USB audio disconnected. List devices again.", StartProgress.FAILED);
                 render();
                 return;
             }
@@ -624,7 +640,12 @@ public final class MainActivity extends Activity {
         Intent service = new Intent(this, CatService.class);
         selection.writeTo(service);
         startForegroundService(service);
+        onRadioStartProgress("Start requested", StartProgress.SUBMITTED);
     }
+
+    enum StartProgress { WAITING, SUBMITTED, FAILED }
+
+    void onRadioStartProgress(String message, StartProgress progress) {}
 
     private void copyDiagnostics() {
         CatService.Status state = CatService.status();

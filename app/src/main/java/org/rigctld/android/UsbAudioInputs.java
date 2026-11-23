@@ -37,8 +37,9 @@ final class UsbAudioInputs {
             }
             if (endpoints.isEmpty()) continue;
             String product = device.getProductName();
+            if (product != null) product = product.trim();
             String label = String.format(Locale.ROOT, "%s (%04x:%04x)",
-                product == null || product.trim().isEmpty() ? "USB audio input" : product,
+                product == null || product.isEmpty() ? "USB audio input" : product,
                 device.getVendorId(), device.getProductId());
             inputs.add(new Input(device.getDeviceName(), label, List.copyOf(endpoints)));
         }

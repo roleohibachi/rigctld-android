@@ -20,4 +20,9 @@ Hardware owners can reproduce, test and submit fixes on the exact setup that fai
 2. Build from the documented toolchain for that repository. Run the same minimum reproduction before and after the patch. Include a fake-transport test or sanitized transcript when it can demonstrate the regression without the radio. Keep real TX opt-in, low power and into a dummy load.
 3. Review the diff and open the PR from your fork. Include exact revisions, the hardware and settings, reproduction steps, before/after results, automated test results and any gaps. If both projects need changes, link their PRs.
 
+For ADB-based reports, start with `scripts/rigctld-android list-devices`
+and `scripts/rigctld-android status`. Include the receive-only command that
+reproduces the problem and its sanitized JSON output. The CLI requires the
+debug APK. [ADB command line](README.md#adb-command-line-for-debug-builds)
+
 The [build and verification guide](README.md) covers the Docker debug build, dummy-rig checks, physical CAT checks and the app’s **Copy diagnostics** action. The [audit](AUDIT.md) identifies the Android reference paths and hardware test sequence.

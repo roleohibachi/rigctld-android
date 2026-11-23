@@ -188,6 +188,49 @@ Start the hardware matrix with the FX-4CR over USB using BG2FX model **2053**. L
 
 For wireless ADB, keep the phone’s USB port available for the rig. Before starting USB CAT, disconnect any other app that is using the rig’s CAT port. If **Refresh ports** is empty, `adb shell dumpsys usb` can distinguish an absent USB device from a device that Android sees but the app does not list. USB baud settings take effect after port detection.
 
+### ADB command line for debug builds
+
+With the debug APK installed and ADB connected, run these commands on the
+computer. The wrapper needs Python 3 and `adb` on PATH. Add `-s SERIAL`
+before the subcommand when selecting a phone.
+
+```sh
+scripts/rigctld-android status
+scripts/rigctld-android list-devices
+scripts/rigctld-android start-rx dummy
+scripts/rigctld-android status
+scripts/rigctld-android stop
+```
+
+For FX-4CR USB receive audio, use the serial port ID and the C-Media audio
+ID returned by `list-devices`. USB IDs can change on reconnect.
+
+```sh
+scripts/rigctld-android start-rx usb --model 2053 --port "$serial_port_id" --audio "$usb_audio_id"
+scripts/rigctld-android status
+```
+
+Omit `--audio` for CAT only. For (tr)uSDX serial audio, use
+`--model 2055 --trusdx-audio`. For a paired Bluetooth CAT port, use
+`start-rx bluetooth --model MODEL --port PORT`. Grant Nearby devices access
+through **Refresh ports** in the app if Bluetooth devices are unavailable.
+`start-rx` brings the app forward so Android can show its USB and microphone
+permission prompts. Approve any prompts on the phone. Check `status` for
+`listening: true` and the `receive_audio` status after the start request.
+`stop` requests a graceful shutdown. Wait for `active: false` before
+starting another session.
+
+The CLI's Android components ship only in debug builds and require
+Android's privileged debugging permission. These commands start
+receive-only physical sessions. Enable CAT PTT or USB transmit audio
+through the app's confirmation dialog when testing transmit.
+
+On the Pixel 8a (Android 17), the CLI started and stopped the dummy rig,
+rejected a stale USB port ID, and started an FX-4CR session with C-Media
+USB receive sharing. CAT read PTT off, and a three-second Hamlib receive
+probe measured nonzero 48 kHz mono audio with zero gaps. CLI session
+startup over Bluetooth and with (tr)uSDX audio still needs a hardware check.
+
 The listener binds to loopback. Other Android apps can connect locally. Physical sessions expose common CAT commands and require explicit opt-in to key the radio. With that opt-in, one connection can claim PTT, with release attempted on owner disconnect, a three-minute timeout or service stop. The app reports an unconfirmed release if the CAT link fails. Perform actual keying checks deliberately at low power into a dummy load.
 
 ## Implementation and source provenance

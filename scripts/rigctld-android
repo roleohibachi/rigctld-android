@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Control a debug build of Android rigctld through ADB."""
+
+import argparse
+import json
+import re
+import shlex
+import subprocess
+import sys
+import uuid
+
+
+PACKAGE = "org.rigctld.android"
+
+
+def shell(adb, *args):
+    result = subprocess.run(
+        [*adb, "shell", shlex.join(args)], capture_output=True, text=True, timeout=25
+    )
+    if result.returncode or re.search(r"^Error\b", result.stdout, re.MULTILINE):
+        raise RuntimeError((result.stderr or result.stdout).strip())
+    return result.stdout
+
+
+def command(adb, name):
+    output = shell(
+        adb, "am", "broadcast", "--receiver-foreground", "-n", f"{PACKAGE}/.DebugCommandReceiver",
+        "-a", f"{PACKAGE}.DEBUG_COMMAND", "--es", "command", name,
+    )
+    match = re.search(r'^Broadcast completed: result=(-?\d+), data="(.*)"$', output, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"No reply from the debug APK. Check the installed build.\n{output.strip()}")
+    if int(match[1]) != 0:
+        raise RuntimeError(match[2])
+    return json.loads(match[2])
+
+
+def positive_int(value):
+    number = int(value)
+    if not 0 < number <= 2_147_483_647:
+        raise argparse.ArgumentTypeError("expected a positive Android integer")
+    return number
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-s", "--serial", help="ADB device serial or wireless address")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("status", help="show current app and session status as JSON")
+    commands.add_parser("list-devices", help="list serial ports and USB audio inputs as JSON")
+    commands.add_parser("stop", help="request a graceful service stop")
+    start = commands.add_parser("start-rx", help="open a receive-only session")
+    start.add_argument("transport", choices=("dummy", "usb", "bluetooth"))
+    start.add_argument("--model", type=positive_int, help="Hamlib model ID")
+    start.add_argument("--port", help="serial port ID from list-devices")
+    start.add_argument("--baud", type=positive_int, help="serial baud rate")
+    start.add_argument("--audio", help="USB audio input ID from list-devices")
+    start.add_argument("--rts-cts", action="store_true", help="enable USB serial hardware flow control")
+    start.add_argument("--playback-capture", action="store_true", help="play USB receive audio for capture apps")
+    start.add_argument("--trusdx-audio", action="store_true", help="use (tr)uSDX audio over the CAT port")
+    args = parser.parse_args()
+    adb = ["adb", "-s", args.serial] if args.serial else ["adb"]
+
+    try:
+        if args.command == "start-rx":
+            if args.transport != "dummy" and (args.model is None or not args.port):
+                parser.error("USB and Bluetooth require --model and --port")
+            request_id = uuid.uuid4().hex
+            extras = ["--es", "transport", args.transport, "--es", "request_id", request_id]
+            for name in ("model", "baud", "port", "audio"):
+                value = getattr(args, name)
+                if value is not None:
+                    extras.extend(("--ei" if isinstance(value, int) else "--es", name, str(value)))
+            for name in ("rts_cts", "playback_capture", "trusdx_audio"):
+                if getattr(args, name):
+                    extras.extend(("--ez", name, "true"))
+            shell(adb, "am", "start", "-W", "-n", f"{PACKAGE}/.DebugReceiveActivity",
+                  "-a", f"{PACKAGE}.DEBUG_START_RX", *extras)
+            result = command(adb, "status")
+            request = result["start_rx_request"]
+            if request is None or request["id"] != request_id:
+                raise RuntimeError("No acknowledgement yet. Unlock the phone and check status.")
+            if request["state"] == "failed":
+                raise RuntimeError(request["message"])
+        else:
+            result = command(adb, args.command)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+        print(f"{parser.prog}: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

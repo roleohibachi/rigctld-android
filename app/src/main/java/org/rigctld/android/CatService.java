@@ -32,7 +32,8 @@ public final class CatService extends Service {
     private static final String CHANNEL = "cat";
     private static final int NOTIFICATION = 1;
 
-    private static volatile Status status = new Status(false, "Stopped", null);
+    private static volatile Status status = new Status(false, "Stopped", null,
+        false, null, null, null);
     private final Handler main = new Handler(Looper.getMainLooper());
     private long server;
     private boolean stopping;
@@ -72,11 +73,20 @@ public final class CatService extends Service {
         final boolean active;
         final String message;
         final RadioSelection radio;
+        final boolean listening;
+        final String receiveAudio;
+        final String receivePlayback;
+        final String transmitAudio;
 
-        Status(boolean active, String message, RadioSelection radio) {
+        Status(boolean active, String message, RadioSelection radio, boolean listening,
+               String receiveAudio, String receivePlayback, String transmitAudio) {
             this.active = active;
             this.message = message;
             this.radio = radio;
+            this.listening = listening;
+            this.receiveAudio = receiveAudio;
+            this.receivePlayback = receivePlayback;
+            this.transmitAudio = transmitAudio;
         }
     }
 
@@ -352,6 +362,7 @@ public final class CatService extends Service {
         listening = false;
         audioStatus = null;
         playbackStatus = null;
+        transmitStatus = null;
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -363,7 +374,9 @@ public final class CatService extends Service {
     }
 
     private void publish(boolean active, String message) {
-        status = new Status(active, message, selection);
+        boolean ready = active && listening && !stopping;
+        status = new Status(active, message, selection, ready,
+            ready ? audioStatus : null, ready ? playbackStatus : null, ready ? transmitStatus : null);
         sendBroadcast(new Intent(ACTION_STATUS).setPackage(getPackageName()));
     }
 
