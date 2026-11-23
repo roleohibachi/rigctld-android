@@ -60,6 +60,8 @@ The owner reported that Robot36 Playback Test (`2af2390`) successfully received 
 
 The owner verified that **GGMorse Rigctld** receives the FX-4CR's network stream on the Pixel 8a. Its signal level followed the rig's line level, and the owner observed apparent CW decoding. A separate software test fed a 700 Hz, 18 WPM synthetic signal through the embedded Hamlib daemon to the same JNI receiver and decoded `CQ CQ DE TEST` after an initial misread letter. The Play Store GGMorse app coexisted with the test app on the Pixel.
 
+On 2026-11-23, **JS8Android Rigctld Test** on the Pixel 8a also received live FX-4CR C-Media USB audio over rigctld while CAT was connected at `localhost:4532`. The client negotiated 48 kHz audio, decimated it to 12 kHz, and logged nonzero PCM levels in the decoder. CAT read 7.049600 MHz, USB, 2,200 Hz passband and PTT off. A live decode with a known JS8 signal is still pending.
+
 ## Build and test with Docker
 
 From a Linux host with Docker access, run these commands from the workspace root. The Android image downloads the pinned SDK, NDK and build tools and accepts Google’s Android SDK licenses inside the image.
