@@ -92,6 +92,19 @@ Keep CAT PTT off for this milestone. First report the actual USB identity, forma
 
 Offer Bluetooth audio alongside USB for rigs that support it. A rig profile should specify the CAT transport, audio transport and supported RX/TX directions. Use Android’s communication audio route for supported headset-profile rigs and evaluate vendor audio links separately. Start Bluetooth verification with the FX-4CR from the earlier JS8Android report. Confirm the actual RX/TX routes, concurrent CAT and audio, usable bandwidth, latency and reconnect behavior before listing a rig and profile as supported. On route loss, mute TX audio and request PTT release.
 
+The initial Bluetooth receive path uses the paired CAT device's HFP
+communication route and Android AudioRecord, then feeds the existing
+48 kHz mono Hamlib RX stream. On the Pixel 8a with FX-4CR, CAT read
+7.049600 MHz and PTT off while a four-second stream probe received
+nonzero audio with no reported gaps. Starting HFP concurrently with
+initial CAT opening timed out once, so capture starts after CAT listens.
+A known signal and Bluetooth TX remain unverified.
+JS8Android displayed a live waterfall and logged nonzero input from the
+same Bluetooth stream. A subsequent CAT startup timed out before audio
+opened; CAT-only and a later combined attempt succeeded. Investigate
+Bluetooth connection reliability and verify a known signal before claiming
+decode support.
+
 Include (tr)uSDX audio over its shared CAT serial link in this phase. One session should own the port and handle CAT reply and PCM framing together.
 
 ### Phase 3: upstream Hamlib streaming integration

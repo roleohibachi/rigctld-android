@@ -69,6 +69,8 @@ public class MainActivity extends Activity {
     private CheckBox allowPtt;
     private LinearLayout radioSettings;
     private RadioSelection awaitingUsbPermission;
+    private RadioSelection awaitingBluetoothAudioPermission;
+    private CheckBox bluetoothAudio;
 
     private static final class Port {
         final String label;
@@ -212,7 +214,9 @@ public class MainActivity extends Activity {
         transport.setEnabled(ready);
         ports.setEnabled(ready);
         refresh.setEnabled(ready);
-        allowPtt.setEnabled(ready && (transport.getSelectedItemPosition() != RadioSelection.USB || !shareAudio.isChecked()));
+        allowPtt.setEnabled(ready
+            && (transport.getSelectedItemPosition() != RadioSelection.USB || !shareAudio.isChecked())
+            && (transport.getSelectedItemPosition() != RadioSelection.BLUETOOTH || !bluetoothAudio.isChecked()));
         rtsCts.setEnabled(ready && !(isTruSdxUsb() && shareAudio.isChecked()));
         rigModel.setEnabled(ready);
         baud.setEnabled(ready);
@@ -257,6 +261,13 @@ public class MainActivity extends Activity {
             render();
         });
         content.addView(shareAudio);
+        bluetoothAudio = new CheckBox(this);
+        bluetoothAudio.setText("Share Bluetooth headset audio (receive only)");
+        bluetoothAudio.setOnCheckedChangeListener((button, enabled) -> {
+            if (enabled) allowPtt.setChecked(false);
+            render();
+        });
+        content.addView(bluetoothAudio);
         transmitAudio = new CheckBox(this);
         transmitAudio.setText("Allow USB transmit audio (FX-4CR)");
         transmitAudio.setOnCheckedChangeListener((button, enabled) -> {
@@ -331,6 +342,8 @@ public class MainActivity extends Activity {
         boolean trusdx = isTruSdxUsb();
         shareAudio.setText(trusdx ? "Share (tr)uSDX serial audio (receive only)" : "Share selected USB audio (receive only)");
         shareAudio.setVisibility(usbSelected ? View.VISIBLE : View.GONE);
+        bluetoothAudio.setVisibility(transport.getSelectedItemPosition() == RadioSelection.BLUETOOTH ? View.VISIBLE : View.GONE);
+        bluetoothAudio.setEnabled(available && !state.active);
         shareAudio.setEnabled(available && !state.active && awaitingUsbPermission == null);
         receivePlayback.setVisibility(usbSelected && !trusdx && shareAudio.isChecked() ? View.VISIBLE : View.GONE);
         receivePlayback.setEnabled(shareAudio.isEnabled() && !transmitAudio.isChecked());
@@ -467,8 +480,13 @@ public class MainActivity extends Activity {
         if (requestCode == 1) refreshPorts();
         if (requestCode == RECORD_AUDIO_REQUEST) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-                requestUsbAudioPermission();
+                if (awaitingBluetoothAudioPermission != null) {
+                    RadioSelection selection = awaitingBluetoothAudioPermission;
+                    awaitingBluetoothAudioPermission = null;
+                    startServiceForRadio(selection);
+                } else requestUsbAudioPermission();
             } else {
+                awaitingBluetoothAudioPermission = null;
                 finishAudioPermission("Microphone permission is required for USB audio capture.");
             }
         }
@@ -557,6 +575,7 @@ public class MainActivity extends Activity {
             choice == RadioSelection.USB && rtsCts.isChecked() && !trusdxAudio,
             usbTx || (audioPath == null && !trusdxAudio && allowPtt.isChecked()),
             audioPath, audioPath != null && !usbTx && receivePlayback.isChecked(), trusdxAudio, usbTx);
+        selection.bluetoothAudio = choice == RadioSelection.BLUETOOTH && bluetoothAudio.isChecked();
         startWithConfirmation(selection, port.deviceId);
     }
 
@@ -628,6 +647,11 @@ public class MainActivity extends Activity {
     }
 
     private void start(RadioSelection selection) {
+        if (selection.bluetoothAudio && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            awaitingBluetoothAudioPermission = selection;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO_REQUEST);
+            return;
+        }
         if (selection.usbAudioPath != null) {
             UsbDevice audio = getSystemService(UsbManager.class).getDeviceList().get(selection.usbAudioPath);
             if (!UsbAudioMonitor.supportsRxStream(audio)) {

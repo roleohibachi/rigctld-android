@@ -23,6 +23,8 @@ import com.js8call.core.BluetoothSerialBridge;
 import com.js8call.core.UsbSerialBridge;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public final class CatService extends Service {
@@ -47,6 +49,7 @@ public final class CatService extends Service {
     private RadioSelection selection;
     private boolean watcherRegistered;
     private String stoppedReason;
+    private volatile CountDownLatch bluetoothCatReady;
 
     private final BroadcastReceiver detachWatcher = new BroadcastReceiver() {
         @Override
@@ -113,6 +116,7 @@ public final class CatService extends Service {
             ? ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             : (Build.VERSION.SDK_INT >= 34 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE : 0);
         if (valid && selection.receivePlayback) foregroundType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
+        if (valid && selection.bluetoothAudio) foregroundType |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
         try {
             startForeground(NOTIFICATION, notification("Opening CAT service"), foregroundType);
             if (!valid) {
@@ -179,14 +183,30 @@ public final class CatService extends Service {
                 capture = new Thread(() -> runUsbAudio(runningServer, radio, cancelAudio), "rigctld-usb-audio");
                 capture.start();
             }
+            if (radio.bluetoothAudio) {
+                CountDownLatch catReady = new CountDownLatch(1);
+                bluetoothCatReady = catReady;
+                capture = new Thread(() -> {
+                    try {
+                        while (!cancelAudio.get() && !catReady.await(100, TimeUnit.MILLISECONDS)) {}
+                        if (!cancelAudio.get()) runBluetoothAudio(runningServer, radio, cancelAudio);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                },
+                    "rigctld-bluetooth-audio");
+                capture.start();
+            }
             error = nativeRun(runningServer, radio.model, radio.path, radio.baud,
-                radio.rtsCts ? "Hardware" : "None", radio.allowPtt, radio.usbAudioPath != null,
+                radio.rtsCts ? "Hardware" : "None", radio.allowPtt, radio.usbAudioPath != null || radio.bluetoothAudio,
                 radio.trusdxAudio, output);
         } catch (RuntimeException | LinkageError failure) {
             error = "CAT server failed: " + failure.getMessage();
         } finally {
             cancelAudio.set(true);
+            if (bluetoothCatReady != null) bluetoothCatReady.countDown();
             joinAudio(capture);
+            bluetoothCatReady = null;
             joinAudio(transmit);
             if (output != 0) UsbAudioMonitor.destroyOutput(output);
         }
@@ -252,6 +272,20 @@ public final class CatService extends Service {
         }
     }
 
+    private void runBluetoothAudio(long runningServer, RadioSelection radio, AtomicBoolean cancelled) {
+        String outcome;
+        try {
+            String address = radio.path.split(":")[1];
+            outcome = BluetoothAudioCapture.capture(this, address, cancelled,
+                message -> postAudioStatus(runningServer, message, false),
+                (samples, count) -> nativeAudioSamples(runningServer, samples, count));
+        } catch (RuntimeException | LinkageError error) {
+            outcome = "Bluetooth audio failed: " + error.getMessage();
+        }
+        nativeAudioFailed(runningServer);
+        if (!cancelled.get()) postAudioStatus(runningServer, outcome, false);
+    }
+
     private ReceivePlayback openPlayback(long runningServer) {
         Consumer<String> update = message -> postAudioStatus(runningServer, message, true);
         try {
@@ -272,6 +306,7 @@ public final class CatService extends Service {
     }
 
     private void onNativeListening(boolean serialAudioStarted) {
+        if (bluetoothCatReady != null) bluetoothCatReady.countDown();
         main.post(() -> {
             if (!stopping && server != 0) {
                 listening = true;
@@ -314,6 +349,9 @@ public final class CatService extends Service {
         String message = "Listening on " + ENDPOINT;
         if (selection.usbAudioPath != null) {
             message += "\n" + (audioStatus == null ? "Opening C-Media USB receive audio" : audioStatus);
+        }
+        if (selection.bluetoothAudio) {
+            message += "\n" + (audioStatus == null ? "Opening Bluetooth receive audio" : audioStatus);
         }
         if (selection.trusdxAudio) message += "\n" + audioStatus;
         if (selection.usbTx) {
@@ -403,6 +441,7 @@ public final class CatService extends Service {
     private native String nativeRun(long handle, int model, String path, String baud, String handshake,
                                     boolean allowPtt, boolean usbAudioRx, boolean trusdxAudioRx, long output);
     private static native void nativeAudioFailed(long handle);
+    private static native void nativeAudioSamples(long handle, short[] samples, int count);
     private static native long nativeTruSdxSamples();
     private static native void nativeStop(long handle);
     private static native void nativeDestroy(long handle);

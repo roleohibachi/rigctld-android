@@ -89,6 +89,16 @@ Java_org_rigctld_android_CatService_nativeAudioFailed(JNIEnv*, jclass, jlong han
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_org_rigctld_android_CatService_nativeAudioSamples(JNIEnv* env, jclass, jlong handle,
+                                                       jshortArray samples, jint count) {
+    if (count <= 0 || count > env->GetArrayLength(samples)) return;
+    jshort* data = env->GetShortArrayElements(samples, nullptr);
+    if (!data) return;
+    embedded_audio_push(server_from_handle(handle)->audio(), data, static_cast<size_t>(count) * sizeof(jshort));
+    env->ReleaseShortArrayElements(samples, data, JNI_ABORT);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_org_rigctld_android_CatService_nativeStop(JNIEnv*, jclass, jlong handle) {
     server_from_handle(handle)->stop();
 }

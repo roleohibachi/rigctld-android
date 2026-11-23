@@ -246,6 +246,23 @@ Omit `--audio` for CAT only. For (tr)uSDX serial audio, use
 `--model 2055 --trusdx-audio`. For a paired Bluetooth CAT port, use
 `start-rx bluetooth --model MODEL --port PORT`. Grant Nearby devices access
 through **Refresh ports** in the app if Bluetooth devices are unavailable.
+For Bluetooth headset receive sharing, append `--bluetooth-audio`. The app
+selects the paired rig's HFP communication device, captures mono PCM at
+48 kHz, and stops the stream if Android routes capture elsewhere. Wait for
+**Bluetooth receive ready** and check the actual route and signal level.
+The initial Bluetooth audio implementation is receive-only.
+
+On a Pixel 8a with Android 17 and an FX-4CR, Bluetooth CAT model 2053
+connected before HFP capture. Android reported the FX-4CR SCO microphone
+as the recording route. A four-second Hamlib client check received nonzero
+48 kHz mono PCM with zero reported gaps while CAT read 7.049600 MHz, USB,
+and PTT off. This checks the Android stream format, which may be resampled
+from the Bluetooth profile. A known signal, actual Bluetooth codec
+bandwidth, reconnection, and Bluetooth transmit audio remain unverified.
+JS8Android also displayed a live waterfall and logged nonzero decoder input
+on this Bluetooth stream. One subsequent Bluetooth CAT startup timed out;
+CAT-only and a later combined retry succeeded. Reconnect reliability needs
+further investigation.
 `start-rx` brings the app forward so Android can show its USB and microphone
 permission prompts. Approve any prompts on the phone. Check `status` for
 `listening: true` and the `receive_audio` status after the start request.

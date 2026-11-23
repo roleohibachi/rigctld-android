@@ -66,6 +66,7 @@ public final class DebugCommandReceiver extends BroadcastReceiver {
                 .put("cat_ptt_enabled", radio.allowPtt)
                 .put("usb_audio_device", nullable(radio.usbAudioPath))
                 .put("trusdx_audio", radio.trusdxAudio)
+                .put("bluetooth_audio", radio.bluetoothAudio)
                 .put("playback_capture", radio.receivePlayback)
                 .put("usb_tx_audio_enabled", radio.usbTx);
         }

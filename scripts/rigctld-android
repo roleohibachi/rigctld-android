@@ -61,6 +61,7 @@ def main():
     start.add_argument("--rts-cts", action="store_true", help="enable USB serial hardware flow control")
     start.add_argument("--playback-capture", action="store_true", help="play USB receive audio for capture apps")
     start.add_argument("--trusdx-audio", action="store_true", help="use (tr)uSDX audio over the CAT port")
+    start.add_argument("--bluetooth-audio", action="store_true", help="share Bluetooth headset receive audio")
     tx = start.add_mutually_exclusive_group()
     tx.add_argument("--usb-tx", action="store_true", help="request FX-4CR USB transmit audio with on-phone confirmation")
     tx.add_argument("--cat-ptt", action="store_true", help="request CAT PTT with on-phone confirmation")
@@ -77,7 +78,7 @@ def main():
                 value = getattr(args, name)
                 if value is not None:
                     extras.extend(("--ei" if isinstance(value, int) else "--es", name, str(value)))
-            for name in ("rts_cts", "playback_capture", "trusdx_audio", "usb_tx", "cat_ptt"):
+            for name in ("rts_cts", "playback_capture", "trusdx_audio", "bluetooth_audio", "usb_tx", "cat_ptt"):
                 if getattr(args, name):
                     extras.extend(("--ez", name, "true"))
             shell(adb, "am", "start", "-W", "-n", f"{PACKAGE}/.DebugReceiveActivity",

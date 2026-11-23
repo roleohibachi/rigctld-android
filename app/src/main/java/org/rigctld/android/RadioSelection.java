@@ -20,6 +20,7 @@ final class RadioSelection {
     final boolean receivePlayback;
     final boolean trusdxAudio;
     final boolean usbTx;
+    boolean bluetoothAudio;
 
     RadioSelection(int transport, int model, String path, String baud, boolean rtsCts, boolean allowPtt) {
         this(transport, model, path, baud, rtsCts, allowPtt, null, false, false, false);
@@ -50,18 +51,22 @@ final class RadioSelection {
         intent.putExtra("receivePlayback", receivePlayback);
         intent.putExtra("trusdxAudio", trusdxAudio);
         intent.putExtra("usbTx", usbTx);
+        intent.putExtra("bluetoothAudio", bluetoothAudio);
     }
 
     static RadioSelection readFrom(Intent intent) {
-        return new RadioSelection(
+        RadioSelection selection = new RadioSelection(
             intent.getIntExtra("transport", DUMMY), intent.getIntExtra("model", 1),
             intent.getStringExtra("path"), intent.getStringExtra("baud"),
             intent.getBooleanExtra("rtsCts", false), intent.getBooleanExtra("allowPtt", false),
             intent.getStringExtra("usbAudioPath"), intent.getBooleanExtra("receivePlayback", false),
             intent.getBooleanExtra("trusdxAudio", false), intent.getBooleanExtra("usbTx", false));
+        selection.bluetoothAudio = intent.getBooleanExtra("bluetoothAudio", false);
+        return selection;
     }
 
     boolean valid() {
+        if (bluetoothAudio && (transport != BLUETOOTH || allowPtt || usbAudioPath != null || trusdxAudio)) return false;
         if (usbTx && (model != FX4_MODEL || usbAudioPath == null || !allowPtt || receivePlayback || trusdxAudio)) {
             return false;
         }
