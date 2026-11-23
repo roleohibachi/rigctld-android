@@ -22,6 +22,8 @@ JS8Android also showed a blank waterfall on the Pixel. ADB matched its unsilence
 
 The owner confirmed that the USB audio diagnostics picker from `5a5cda7` lists both FX-4CR inputs on the Pixel 8a. With the direct USB monitor from `fd0c54a`, the owner reported frames from C-Media, none from QCC3024, and level changes when adjusting the rig's AUX output.
 
+On 2026-11-23, the Pixel 8a on Android 17 (API 37) enumerated playback endpoints on both FX-4CR USB audio devices. At the time of the check, Android audio policy exposed QCC3024 (`0a12:4007`, interface 2 alternate 1, endpoint `0x03` OUT) as the only selectable USB playback route. C-Media (`0d8c:013c`, interface 1 alternate 1, endpoint `0x01` OUT) had appeared briefly in the route log during attachment. A separate muted `AudioTrack` probe held the QCC3024 route and its playback head advanced from 30,720 to 82,560 frames at 48 kHz stereo PCM16. The probe sent only zero samples. No PTT command was sent and the subsequent CAT PTT readback was `0`. The owner reported a 0.1 W setting and a dummy load limited to 1 W. Radio modulation and USB route-loss handling remain unverified. Compare `adb shell dumpsys usb` and `adb shell dumpsys media.audio_policy` to reproduce the device and policy inventory.
+
 The Docker host suite verifies 48 kHz mono PCM16 over IPv4 loopback UDP from the embedded dummy rig and from a per-session provider fed a known sample pattern. Both answer CAT on a second TCP connection. The tests also cover stream ownership, disconnect cleanup, multicast rejection, and TX rejection for ordinary sessions. Run them with `bash scripts/docker-build.sh test`.
 
 The host test runner has an explicit `dummy-tx-loopback` mode. Hamlib routes
