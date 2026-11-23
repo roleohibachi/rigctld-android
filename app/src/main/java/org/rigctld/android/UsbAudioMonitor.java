@@ -39,17 +39,27 @@ final class UsbAudioMonitor {
 
     static String capture(UsbManager manager, UsbDevice device, AtomicBoolean cancelled,
                           Consumer<String> update, long server, ReceivePlayback playback) {
-        return transfer(manager, device, cancelled, update, server, playback, false);
+        return transfer(manager, device, cancelled, update, server, playback, false, 0);
     }
 
     static String checkSilentOutput(UsbManager manager, UsbDevice device, AtomicBoolean cancelled) {
-        if (!supportsRxStream(device)) return "Select the C-Media USB audio device.";
-        return transfer(manager, device, cancelled, null, 0, null, true);
+        return output(manager, device, cancelled, null, 0);
     }
+
+    static String output(UsbManager manager, UsbDevice device, AtomicBoolean cancelled,
+                         Consumer<String> update, long handle) {
+        if (!supportsRxStream(device)) return "Select the C-Media USB audio device.";
+        return transfer(manager, device, cancelled, update, 0, null, true, handle);
+    }
+
+    static native long createOutput();
+    static native void destroyOutput(long handle);
+    private static native String nativeOutput(int fd, AtomicBoolean cancelled,
+                                              Consumer<String> update, long handle);
 
     private static String transfer(UsbManager manager, UsbDevice device, AtomicBoolean cancelled,
                                    Consumer<String> update, long server, ReceivePlayback playback,
-                                   boolean output) {
+                                   boolean output, long outputHandle) {
         Format format = output ? new Format(1, 0x01, 2, true) : format(device);
         String direction = output ? "playback" : "capture";
         if (format == null) return "This USB input does not have a monitor format yet.";
@@ -97,8 +107,9 @@ final class UsbAudioMonitor {
                     if (result != rate.length) return "Could not set USB " + direction + " to 48 kHz (" + result + ").";
                 }
                 System.loadLibrary("android_rigctld");
+                if (output) return nativeOutput(connection.getFileDescriptor(), cancelled, update, outputHandle);
                 return nativeMeasure(connection.getFileDescriptor(), endpoint.getAddress(),
-                    output ? 192 : endpoint.getMaxPacketSize(), format.channels(),
+                    endpoint.getMaxPacketSize(), format.channels(),
                     cancelled, update, server, playback);
             } finally {
                 connection.setInterface(idle);

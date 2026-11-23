@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "tx_stream.h"
+#include "embedded_audio.h"
 
 extern "C" {
 #include "config.h"
@@ -23,8 +24,8 @@ struct TxStream::State {
     };
     static_assert(std::is_standard_layout_v<HookTable>);
 
-    State(RIG* instance, TxPlayback& sink)
-        : rig(instance), playback(sink), prior(instance->caps), table{*prior, this} {}
+    State(RIG* instance, TxPlayback& sink, embedded_audio* source)
+        : rig(instance), playback(sink), capture(source), prior(instance->caps), table{*prior, this} {}
 
     static State& from(RIG* rig) {
         return *reinterpret_cast<HookTable*>(rig->caps)->state;
@@ -33,6 +34,9 @@ struct TxStream::State {
     static int open(RIG* rig, rig_stream* stream) {
         auto& state = from(rig);
         const auto& config = stream->config;
+        if (state.capture && config.type == RIG_STREAM_TYPE_AUDIO_RX) {
+            return embedded_audio_open_rx(state.capture, stream);
+        }
         const int client = rigctld_client_id_get();
         std::lock_guard lock(state.mutex);
         if (client <= 0 || state.stream || !state.playback.available()) return -RIG_ENAVAIL;
@@ -48,6 +52,10 @@ struct TxStream::State {
 
     static int close(RIG* rig, rig_stream* stream) {
         auto& state = from(rig);
+        if (state.capture && stream->type == RIG_STREAM_TYPE_AUDIO_RX) {
+            embedded_audio_close_rx(state.capture, stream);
+            return RIG_OK;
+        }
         std::lock_guard lock(state.mutex);
         if (state.stream == stream) {
             state.playback.discard();
@@ -87,6 +95,7 @@ struct TxStream::State {
 
     RIG* rig;
     TxPlayback& playback;
+    embedded_audio* capture;
     rig_caps* prior;
     HookTable table;
     mutable std::mutex mutex;
@@ -99,7 +108,8 @@ struct TxStream::State {
     Clock::time_point last_pcm;
 };
 
-TxStream::TxStream(RIG* rig, TxPlayback& playback) : state_(std::make_unique<State>(rig, playback)) {}
+TxStream::TxStream(RIG* rig, TxPlayback& playback, embedded_audio* capture)
+    : state_(std::make_unique<State>(rig, playback, capture)) {}
 
 TxStream::~TxStream() {
     if (state_->rig->caps == &state_->table.caps) state_->rig->caps = state_->prior;
@@ -107,17 +117,20 @@ TxStream::~TxStream() {
 
 int TxStream::attach() {
     auto& state = *state_;
-    rig_stream_caps caps{};
+    rig_stream_caps caps_list[2]{};
+    auto& caps = caps_list[0];
     caps.type = RIG_STREAM_TYPE_AUDIO_TX;
     caps.formats = RIG_STREAM_FORMAT_PCM_S16;
     caps.sample_rates[0] = 48000;
     caps.channels[0] = 1;
     caps.max_streams = 1;
-    const int result = stream_set_session_caps(state.rig, &caps, 1);
+    if (state.capture) embedded_audio_rx_caps(&caps_list[1]);
+    const int result = stream_set_session_caps(state.rig, caps_list, state.capture ? 2 : 1);
     if (result != RIG_OK) return result;
     state.table.caps.stream_open = State::open;
     state.table.caps.stream_close = State::close;
     state.table.caps.stream_write = State::write;
+    if (state.capture) state.table.caps.stream_read = nullptr;
     state.rig->caps = &state.table.caps;
     return RIG_OK;
 }

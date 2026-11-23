@@ -54,6 +54,7 @@ public final class MainActivity extends Activity {
     private TextView usbAudioStatus;
     private Button monitorAudio;
     private Button checkUsbOutput;
+    private CheckBox transmitAudio;
     private boolean pendingOutputCheck;
     private Button refreshAudio;
     private CheckBox shareAudio;
@@ -256,6 +257,13 @@ public final class MainActivity extends Activity {
             render();
         });
         content.addView(shareAudio);
+        transmitAudio = new CheckBox(this);
+        transmitAudio.setText("Allow USB transmit audio (FX-4CR)");
+        transmitAudio.setOnCheckedChangeListener((button, enabled) -> {
+            if (enabled) receivePlayback.setChecked(false);
+            renderAudioMonitor();
+        });
+        content.addView(transmitAudio);
         receivePlayback = new CheckBox(this);
         receivePlayback.setText("Play receive audio for capture apps");
         content.addView(receivePlayback);
@@ -325,7 +333,10 @@ public final class MainActivity extends Activity {
         shareAudio.setVisibility(usbSelected ? View.VISIBLE : View.GONE);
         shareAudio.setEnabled(available && !state.active && awaitingUsbPermission == null);
         receivePlayback.setVisibility(usbSelected && !trusdx && shareAudio.isChecked() ? View.VISIBLE : View.GONE);
-        receivePlayback.setEnabled(shareAudio.isEnabled());
+        receivePlayback.setEnabled(shareAudio.isEnabled() && !transmitAudio.isChecked());
+        transmitAudio.setVisibility(usbSelected && !trusdx && shareAudio.isChecked()
+            && UsbAudioMonitor.supportsRxStream(selectedAudioDevice()) ? View.VISIBLE : View.GONE);
+        transmitAudio.setEnabled(shareAudio.isEnabled());
     }
 
     private boolean isTruSdxUsb() {
@@ -535,13 +546,20 @@ public final class MainActivity extends Activity {
                 audioPath = audio.getDeviceName();
             }
         }
+        boolean usbTx = audioPath != null && transmitAudio.isChecked();
+        if (usbTx && model != RadioSelection.FX4_MODEL) {
+            selectionMessage.setText("Use Hamlib model 2053 for FX-4CR USB transmit audio.");
+            return;
+        }
         RadioSelection selection = new RadioSelection(choice, model, port.path, rate,
             choice == RadioSelection.USB && rtsCts.isChecked() && !trusdxAudio,
-            audioPath == null && !trusdxAudio && allowPtt.isChecked(),
-            audioPath, audioPath != null && receivePlayback.isChecked(), trusdxAudio);
+            usbTx || (audioPath == null && !trusdxAudio && allowPtt.isChecked()),
+            audioPath, audioPath != null && !usbTx && receivePlayback.isChecked(), trusdxAudio, usbTx);
         if (selection.allowPtt) {
             new AlertDialog.Builder(this).setTitle("Allow PTT for this session?")
-                .setMessage("Local rigctld clients can key the radio. For testing, connect a dummy load and select low power.")
+                .setMessage(selection.usbTx
+                    ? "A local client can transmit through the radio’s USB audio. Connect the dummy load, verify low power on the radio, and supervise the test."
+                    : "Local rigctld clients can key the radio. For testing, connect a dummy load and select low power.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Allow PTT", (dialog, button) -> startWithPermission(selection, port.deviceId))
                 .show();

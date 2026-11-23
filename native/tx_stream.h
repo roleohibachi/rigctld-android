@@ -6,6 +6,7 @@
 #include <memory>
 
 struct s_rig;
+struct embedded_audio;
 
 class TxPlayback {
 public:
@@ -24,7 +25,7 @@ public:
 // and stream teardown may also come from Hamlib's UDP worker.
 class TxStream {
 public:
-    TxStream(s_rig* rig, TxPlayback& playback);
+    TxStream(s_rig* rig, TxPlayback& playback, embedded_audio* capture);
     ~TxStream();
 
     int attach();

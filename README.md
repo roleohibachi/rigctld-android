@@ -116,6 +116,34 @@ PTT off after the drain.
 
 To test shared receive audio on the FX-4CR, stop the short monitor, choose **USB serial** for CAT, and select **C-Media (`0d8c:013c`)**. Enable **Share selected USB audio (receive only)** and tap **Start**. Grant microphone and USB permissions if prompted. When status shows **C-Media USB receive ready**, a local Hamlib streaming client built from the pinned revision can request one 48 kHz mono PCM16 stream at `127.0.0.1:4532`. Confirm sample level changes with the FX-4CR AUX output and check CAT frequency readback on a second connection. On USB disconnect the client must stop using the stream. Reconnect the rig, refresh the ports and inputs, and restart the service. The client can reopen at the same address. JS8Android needs a rigctld audio adapter to consume this stream.
 
+### FX-4CR USB transmit bench check
+
+Use a suitable dummy load, the lowest power setting you intend to verify,
+and someone at the radio watching its power reading. Run **Check USB output
+(silence)** first. Then select **USB serial**, Hamlib model **2053**, and
+**C-Media (0d8c:013c)**. Enable USB audio sharing and **Allow USB transmit
+audio (FX-4CR)**, then confirm the session. The app should report both
+**C-Media USB receive ready** and **C-Media USB transmit ready**.
+
+In the corresponding JS8Android build, select **Rigctld audio (receive and
+transmit)** and use `127.0.0.1:4532`. Send one short manual message and
+check RF drive and return to receive. Query CAT PTT before and after the
+burst and watch the front-panel TX indicator during the burst. Use **Stop**
+to abort a test. The server stops accepting modem PCM, cancels pending USB transfers and
+attempts CAT unkey on abort. Record the phone and radio firmware, peak power,
+whether CAT read back PTT off, and whether receive resumed. If the frame
+ends early, preserve both apps' PTT results and the rig's TX indicator
+observation with `adb logcat -d -s RigctldUsbTx Js8RigctldTx JS8EngineService`.
+Resume in receive-only mode before collecting further diagnostics.
+
+On 2026-11-23, the Pixel 8a on Android 17 (API 37) cancelled four in-flight
+C-Media transfers during the silent probe. In the separate FX-4CR bench
+attempt at the owner's 0.1 W setting into a dummy load, JS8Android accepted
+one manual Turbo message and reported an error enabling PTT. The owner
+observed the rig's TX indicator for under one second. CAT read PTT off
+after the attempt, and the C-Media receive-only session was restored.
+A complete frame and RF drive remain unverified.
+
 ### Robot36 Playback Capture
 
 Put the radio in receive-only mode, then follow the shared receive setup above. Before tapping **Start**, also enable **Play receive audio for capture apps**. Wait for **Receive playback ready · phone speaker**. Rigctld starts with silence, checks the phone speaker route, and stops playback if Android changes it. The network stream can continue independently.

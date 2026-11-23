@@ -38,6 +38,7 @@ struct Transfer {
     bool pending = false;
     int tx_frames = 0;
     unsigned tx_generation = 0;
+    bool discarded = false;
 };
 
 int usb_ioctl(int fd, unsigned long request, void* argument) {
@@ -69,76 +70,124 @@ struct TransferQueue {
     }
 };
 
-// The diagnostic maps each accepted network frame to a frame in a completed
-// USB transfer. Only zeros are accepted, including from other local clients.
-class SilentUsbPlayback final : public TxPlayback {
+// Owns the PCM queue and serializes URB submission/reaping against a
+// CAT-thread abort. The diagnostic variant accepts only zero samples.
+class CMediaUsbPlayback final : public TxPlayback {
 public:
+    explicit CMediaUsbPlayback(bool silence_only) : silence_only_(silence_only) {}
+
     bool available() const noexcept override {
-        std::lock_guard lock(mutex);
-        return ready;
+        std::lock_guard lock(mutex_);
+        return ready_;
     }
 
     bool enqueue(const void* pcm, std::size_t bytes) noexcept override {
         const auto* data = static_cast<const unsigned char*>(pcm);
-        std::lock_guard lock(mutex);
-        if (!ready || std::any_of(data, data + bytes, [](unsigned char byte) { return byte != 0; })) {
+        std::lock_guard lock(mutex_);
+        if (!ready_ || (silence_only_
+                && std::any_of(data, data + bytes, [](unsigned char byte) { return byte != 0; }))) {
             return false;
         }
-        return pcm_queue.push(pcm, bytes);
+        return pcm_.push(pcm, bytes);
     }
 
     bool drain(std::chrono::milliseconds timeout) noexcept override {
-        std::unique_lock lock(mutex);
-        const unsigned draining = generation;
-        changed.wait_for(lock, timeout, [&] {
-            return !ready || generation != draining || pcm_queue.pending() + in_flight == 0;
+        std::unique_lock lock(mutex_);
+        const unsigned draining = generation_;
+        changed_.wait_for(lock, timeout, [&] {
+            return !ready_ || generation_ != draining || pcm_.pending() + in_flight_ == 0;
         });
-        return ready && generation == draining && pcm_queue.pending() + in_flight == 0;
+        return ready_ && generation_ == draining && pcm_.pending() + in_flight_ == 0;
     }
 
     void discard() noexcept override {
-        std::lock_guard lock(mutex);
-        ++generation;
-        pcm_queue.clear();
-        in_flight = 0;
-        changed.notify_all();
+        std::lock_guard lock(mutex_);
+        ++generation_;
+        pcm_.clear();
+        in_flight_ = 0;
+        if (transfers_) {
+            for (auto& transfer : transfers_->transfers) {
+                if (!transfer.pending || !transfer.tx_frames || transfer.discarded) continue;
+                if (usb_ioctl(transfers_->fd, USBDEVFS_DISCARDURB, transfer.urb.get()) == 0) {
+                    transfer.discarded = true;
+                    ++cancelled_transfers_;
+                } else if (errno != EINVAL) {
+                    // EINVAL means it already completed; any other error
+                    // makes this an unavailable route until it is reopened.
+                    ready_ = false;
+                    failure_ = errno;
+                }
+            }
+        }
+        changed_.notify_all();
     }
 
-    void submit(Transfer& transfer) {
-        std::lock_guard lock(mutex);
-        transfer.tx_frames = pcm_queue.render(transfer.bytes.data(), packets_per_transfer * 48);
-        transfer.tx_generation = generation;
-        in_flight += transfer.tx_frames;
-    }
-
-    void complete(const Transfer& transfer) {
-        std::lock_guard lock(mutex);
-        ready = true;
-        if (transfer.tx_generation != generation) return;
-        in_flight -= transfer.tx_frames;
-        delivered += transfer.tx_frames;
-        changed.notify_all();
+    void bind(TransferQueue& transfers) {
+        std::lock_guard lock(mutex_);
+        transfers_ = &transfers;
     }
 
     void disconnect() {
-        std::lock_guard lock(mutex);
-        ready = false;
-        changed.notify_all();
+        std::lock_guard lock(mutex_);
+        ready_ = false;
+        transfers_ = nullptr;
+        changed_.notify_all();
+    }
+
+    int step(int& packets) {
+        std::lock_guard lock(mutex_);
+        if (failure_) return failure_;
+        auto& transfers = *transfers_;
+        usbdevfs_urb* completed = nullptr;
+        if (usb_ioctl(transfers.fd, USBDEVFS_REAPURBNDELAY, &completed) < 0) return errno;
+        auto& transfer = *static_cast<Transfer*>(completed->usercontext);
+        transfer.pending = false;
+
+        if (!transfer.discarded) {
+            if (completed->status != 0) return -completed->status;
+            for (int i = 0; i < packets_per_transfer; ++i) {
+                const auto& packet = completed->iso_frame_desc[i];
+                if (packet.status != 0 || packet.actual_length != 192) {
+                    return packet.status < 0 ? -packet.status : EIO;
+                }
+            }
+            packets += packets_per_transfer;
+            ready_ = true;
+            if (transfer.tx_generation == generation_) {
+                in_flight_ -= transfer.tx_frames;
+                delivered_ += transfer.tx_frames;
+                changed_.notify_all();
+            }
+        }
+        transfer.discarded = false;
+        transfer.tx_frames = pcm_.render(transfer.bytes.data(), packets_per_transfer * 48);
+        transfer.tx_generation = generation_;
+        in_flight_ += transfer.tx_frames;
+        return transfers.submit(transfer);
     }
 
     int framesDelivered() const {
-        std::lock_guard lock(mutex);
-        return delivered;
+        std::lock_guard lock(mutex_);
+        return delivered_;
+    }
+
+    int transfersCancelled() const {
+        std::lock_guard lock(mutex_);
+        return cancelled_transfers_;
     }
 
 private:
-    mutable std::mutex mutex;
-    std::condition_variable changed;
-    bool ready = false;
-    CMediaPcm pcm_queue;
-    int in_flight = 0;
-    int delivered = 0;
-    unsigned generation = 0;
+    const bool silence_only_;
+    mutable std::mutex mutex_;
+    std::condition_variable changed_;
+    TransferQueue* transfers_ = nullptr;
+    bool ready_ = false;
+    CMediaPcm pcm_;
+    int in_flight_ = 0;
+    int delivered_ = 0;
+    int cancelled_transfers_ = 0;
+    int failure_ = 0;
+    unsigned generation_ = 0;
 };
 
 constexpr uint16_t playback_probe_port = 14533;
@@ -197,7 +246,7 @@ int send_probe_audio(const std::atomic<bool>& stop) {
 }
 
 struct PlaybackProbeSession {
-    SilentUsbPlayback playback;
+    CMediaUsbPlayback playback{true};
     RigctldServer server;
     std::atomic<bool> server_ready{false};
     std::atomic<bool> server_exited{false};
@@ -275,10 +324,8 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     jobject cancelled, jobject update, jlong server_handle, jobject playback) {
     auto* server = reinterpret_cast<RigctldServer*>(server_handle);
     auto* audio = server ? server->audio() : nullptr;
-    const bool silent_output = endpoint == 0x01 && packet_size == 192 && channels == 2
-        && !server && !playback && !update;
     if (fd < 0 || packet_size <= 0 || packet_size > max_packet_size
-        || (channels != 1 && channels != 2) || (!silent_output && (endpoint < 0x81 || endpoint > 0x8f))
+        || (channels != 1 && channels != 2) || endpoint < 0x81 || endpoint > 0x8f
         || (server && (!audio || channels != 1))) {
         return env->NewStringUTF("Invalid USB audio parameters.");
     }
@@ -304,7 +351,6 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     const char* operation = "queue USB audio";
     for (auto& transfer : queue.transfers) {
         if (!transfer.urb) return env->NewStringUTF("Could not allocate USB transfer buffers.");
-        if (silent_output) transfer.bytes.fill(0);
         auto& urb = *transfer.urb;
         urb.type = USBDEVFS_URB_TYPE_ISO;
         urb.endpoint = endpoint;
@@ -323,21 +369,14 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
     int packets = 0;
     int packet_errors = 0;
     const auto start = Clock::now();
-    const auto end = audio ? Clock::time_point::max() : start + (silent_output ? 3s : 5s);
+    const auto end = audio ? Clock::time_point::max() : start + 5s;
     auto last_frames = start;
     auto next_update = start + 250ms;
     bool reported_ready = false;
-    std::unique_ptr<PlaybackProbeSession> probe;
-    if (silent_output && !error && !is_cancelled(env, cancelled, get)) {
-        probe = std::make_unique<PlaybackProbeSession>();
-        if (!probe->start()) return env->NewStringUTF("Could not start the dummy network test.");
-    }
     char message[256];
     while (error == 0 && Clock::now() < end && !is_cancelled(env, cancelled, get)) {
-        if (probe && probe->finished) break;
-        if ((audio && Clock::now() - last_frames > 2s)
-            || (silent_output && Clock::now() - last_frames > 250ms)) {
-            operation = silent_output ? "complete USB output frames" : "receive frames";
+        if (audio && Clock::now() - last_frames > 2s) {
+            operation = "receive frames";
             error = ETIMEDOUT;
             break;
         }
@@ -366,12 +405,6 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         for (int i = 0; i < packets_per_transfer; ++i) {
             const auto& packet = completed->iso_frame_desc[i];
             if (!audio) ++packets;
-            if (silent_output && (packet.status != 0
-                    || packet.actual_length != static_cast<unsigned>(packet_size))) {
-                ++packet_errors;
-                error = packet.status < 0 ? -packet.status : EIO;
-                break;
-            }
             if (packet.status != 0 || packet.actual_length > static_cast<unsigned>(packet_size)
                 || packet.actual_length % (channels * 2) != 0) {
                 if (!audio) ++packet_errors;
@@ -388,13 +421,7 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
             } else if (!audio) {
                 total.add(data, packet.actual_length, channels);
                 recent.add(data, packet.actual_length, channels);
-                if (silent_output) last_frames = Clock::now();
             }
-        }
-        if (error) break;
-        if (probe) {
-            probe->playback.complete(transfer);
-            probe->playback.submit(transfer);
         }
         if (playback_bytes > 0) {
             env->CallVoidMethod(playback, play, playback_samples, playback_bytes);
@@ -421,20 +448,8 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         error = queue.submit(transfer);
     }
     if (env->ExceptionCheck()) return nullptr;
-    if (probe) {
-        probe->close();
-        if (!is_cancelled(env, cancelled, get) && !error) {
-            if (!probe->server_error.empty()) return env->NewStringUTF(probe->server_error.c_str());
-            if (probe->result != RIG_OK || probe->playback.framesDelivered() != playback_probe_frames) {
-                std::snprintf(message, sizeof(message),
-                    "Rigctld TX silence check failed: %d/%d network frames reached USB. Hamlib: %s",
-                    probe->playback.framesDelivered(), playback_probe_frames, rigerror(probe->result));
-                return env->NewStringUTF(message);
-            }
-        }
-    }
     if (!audio && error == 0 && total.frames == 0 && !is_cancelled(env, cancelled, get)) {
-        operation = silent_output ? "complete USB output frames" : "receive frames";
+        operation = "receive frames";
         error = ETIMEDOUT;
     }
     char status[120];
@@ -442,10 +457,6 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         std::snprintf(status, sizeof(status), "Could not %s (USB error %d).", operation, error);
     } else if (is_cancelled(env, cancelled, get)) {
         std::snprintf(status, sizeof(status), "Monitor stopped.");
-    } else if (silent_output) {
-        std::snprintf(status, sizeof(status),
-            "Rigctld TX silence check passed: %d network frames reached USB. Dummy PTT off.",
-            playback_probe_frames);
     } else {
         std::snprintf(status, sizeof(status), "%s", total.nonzero == 0 ? "All samples were zero." : "Samples received.");
     }
@@ -455,4 +466,122 @@ Java_org_rigctld_android_UsbAudioMonitor_nativeMeasure(
         "%s\n48 kHz / %d ch / PCM16 | Frames %d | Nonzero samples %d\nPeak %d | RMS %.0f | USB packet errors %d/%d",
         status, channels, total.frames, total.nonzero, total.peak, total.rms(channels), packet_errors, packets);
     return env->NewStringUTF(message);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_org_rigctld_android_UsbAudioMonitor_createOutput(JNIEnv*, jclass) {
+    return reinterpret_cast<jlong>(static_cast<TxPlayback*>(new (std::nothrow) CMediaUsbPlayback(false)));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_rigctld_android_UsbAudioMonitor_destroyOutput(JNIEnv*, jclass, jlong handle) {
+    delete reinterpret_cast<TxPlayback*>(handle);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_rigctld_android_UsbAudioMonitor_nativeOutput(
+    JNIEnv* env, jclass, jint fd, jobject cancelled, jobject update, jlong handle) {
+    if (fd < 0) return env->NewStringUTF("Invalid USB output descriptor.");
+    const auto get = env->GetMethodID(env->GetObjectClass(cancelled), "get", "()Z");
+    if (!get) return nullptr;
+    const auto accept = update ? env->GetMethodID(env->GetObjectClass(update), "accept", "(Ljava/lang/Object;)V")
+                               : nullptr;
+    if (update && !accept) return nullptr;
+
+    TransferQueue queue{fd, {}};
+    for (auto& transfer : queue.transfers) {
+        if (is_cancelled(env, cancelled, get)) return env->NewStringUTF("USB output stopped.");
+        if (!transfer.urb) return env->NewStringUTF("Could not allocate USB output buffers.");
+        transfer.bytes.fill(0);
+        auto& urb = *transfer.urb;
+        urb.type = USBDEVFS_URB_TYPE_ISO;
+        urb.endpoint = 0x01;
+        urb.flags = USBDEVFS_URB_ISO_ASAP;
+        urb.buffer = transfer.bytes.data();
+        urb.buffer_length = 192 * packets_per_transfer;
+        urb.number_of_packets = packets_per_transfer;
+        urb.usercontext = &transfer;
+        for (int i = 0; i < packets_per_transfer; ++i) urb.iso_frame_desc[i].length = 192;
+        if (queue.submit(transfer)) return env->NewStringUTF("Could not queue the USB output.");
+    }
+
+    std::unique_ptr<PlaybackProbeSession> probe;
+    auto* playback = static_cast<CMediaUsbPlayback*>(reinterpret_cast<TxPlayback*>(handle));
+    if (!playback) {
+        probe = std::make_unique<PlaybackProbeSession>();
+        playback = &probe->playback;
+    }
+    struct Binding {
+        CMediaUsbPlayback& output;
+        ~Binding() {
+            output.discard();
+            output.disconnect();
+        }
+    } binding{*playback};
+    playback->bind(queue);
+    if (probe && !probe->start()) return env->NewStringUTF("Could not start the dummy network test.");
+
+    int packets = 0;
+    int error = 0;
+    bool reported = false;
+    auto last_packet = Clock::now();
+    const auto deadline = probe ? last_packet + 5s : Clock::time_point::max();
+    while (Clock::now() < deadline && !is_cancelled(env, cancelled, get) && !(probe && probe->finished)) {
+        if (Clock::now() - last_packet > 250ms) {
+            error = ETIMEDOUT;
+            break;
+        }
+        pollfd waiter{fd, POLLOUT, 0};
+        const int result = poll(&waiter, 1, 40);
+        if (result == 0 || (result < 0 && errno == EINTR)) continue;
+        if (result < 0) {
+            error = errno;
+            break;
+        }
+        const int previous = packets;
+        error = playback->step(packets);
+        if (error == EAGAIN && !(waiter.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+            error = 0;
+            continue;
+        }
+        if (error != 0) break;
+        if (packets > previous) last_packet = Clock::now();
+
+        if (accept && !reported && playback->available()) {
+            const jstring status = env->NewStringUTF("C-Media USB transmit ready · 48 kHz PCM16");
+            if (!status) return nullptr;
+            env->CallVoidMethod(update, accept, status);
+            env->DeleteLocalRef(status);
+            if (env->ExceptionCheck()) return nullptr;
+            reported = true;
+        }
+    }
+
+    // Notify the server that the route is gone before either USB descriptors
+    // or the Java device connection can be released.
+    playback->discard();
+    playback->disconnect();
+    if (probe) probe->close();
+
+    char status[256];
+    if (env->ExceptionCheck()) return nullptr;
+    if (is_cancelled(env, cancelled, get)) {
+        std::snprintf(status, sizeof(status),
+            "USB output stopped. Cancelled %d in-flight audio transfers.", playback->transfersCancelled());
+    } else if (error) {
+        std::snprintf(status, sizeof(status), "USB output stopped (error %d after %d packets).", error, packets);
+    } else if (!probe) {
+        std::snprintf(status, sizeof(status), "USB output stopped.");
+    } else if (!probe->server_error.empty()) {
+        return env->NewStringUTF(probe->server_error.c_str());
+    } else if (probe->result == RIG_OK && playback->framesDelivered() == playback_probe_frames) {
+        std::snprintf(status, sizeof(status),
+            "Rigctld TX silence check passed: %d network frames reached USB. Dummy PTT off.\n"
+            "48 kHz / stereo / PCM16 | Zero USB errors across %d packets",
+            playback_probe_frames, packets);
+    } else {
+        std::snprintf(status, sizeof(status), "Rigctld TX silence check failed: %d/%d frames reached USB (%s).",
+            playback->framesDelivered(), playback_probe_frames, rigerror(probe->result));
+    }
+    return env->NewStringUTF(status);
 }

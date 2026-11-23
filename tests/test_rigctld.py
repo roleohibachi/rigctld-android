@@ -201,6 +201,24 @@ class RigctldTests(unittest.TestCase):
             self.check_playback_log("Played 4 TX bytes")
             self.check_ptt_off(other, other_reply)
 
+    def test_duplex_session_keeps_receive_stream_after_tx(self):
+        self.restart_with_policy("duplex-fixture")
+        with self.connect() as rx, rx.makefile("rb") as rx_reply, self.connect() as owner, \
+                owner.makefile("rb") as reply, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as audio:
+            result, rx_fields = self.stream_command(rx, rx_reply, b"stream_open AUDIO_RX PCM_S16 48000 channels=1")
+            self.assertEqual(result, b"RPRT 0")
+            send = self.tx_test_sender(owner, reply, audio)
+            owner.sendall(b"T 1\n")
+            self.assertEqual(reply.readline(), b"RPRT 0\n")
+            send(b"\x33\x44", end=True)
+            owner.sendall(b"T 0\n")
+            self.assertEqual(reply.readline(), b"RPRT 0\n")
+            self.check_playback_log("Played 2 TX bytes")
+            result, status = self.stream_command(rx, rx_reply, b"stream_status " + rx_fields[b"stream_id"])
+            self.assertEqual(result, b"RPRT 0")
+            self.assertEqual(status[b"type"], b"AUDIO_RX")
+            self.check_ptt_off(rx, rx_reply)
+
     def test_tx_discard_and_unkey_on_disconnect_or_route_failure(self):
         for failure in ("disconnect", "route failure", "audio stall", "missing burst end"):
             with self.subTest(failure=failure):

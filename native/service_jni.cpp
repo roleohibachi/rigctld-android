@@ -41,7 +41,7 @@ Java_org_rigctld_android_CatService_nativeCreate(JNIEnv*, jclass) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_org_rigctld_android_CatService_nativeRun(
     JNIEnv* env, jobject service, jlong handle, jint model, jstring path,
-    jstring baud, jstring handshake, jboolean allow_ptt, jboolean usb_audio_rx, jboolean trusdx_audio_rx) {
+    jstring baud, jstring handshake, jboolean allow_ptt, jboolean usb_audio_rx, jboolean trusdx_audio_rx, jlong output) {
     jclass type = env->GetObjectClass(service);
     jmethodID listening = env->GetMethodID(type, "onNativeListening", "(Z)V");
     if (listening == nullptr) return nullptr;
@@ -49,7 +49,8 @@ Java_org_rigctld_android_CatService_nativeRun(
         const RigctldServer::Radio radio{
             static_cast<unsigned>(model), string_from_java(env, path),
             string_from_java(env, baud), string_from_java(env, handshake), allow_ptt == JNI_TRUE,
-            false, usb_audio_rx == JNI_TRUE || trusdx_audio_rx == JNI_TRUE
+            false, usb_audio_rx == JNI_TRUE || trusdx_audio_rx == JNI_TRUE,
+            false, reinterpret_cast<TxPlayback*>(output)
         };
         if (env->ExceptionCheck()) return nullptr;
         auto* server = server_from_handle(handle);

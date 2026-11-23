@@ -22,6 +22,7 @@ import android.os.Looper;
 import com.js8call.core.BluetoothSerialBridge;
 import com.js8call.core.UsbSerialBridge;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public final class CatService extends Service {
@@ -38,6 +39,7 @@ public final class CatService extends Service {
     private boolean listening;
     private String audioStatus;
     private String playbackStatus;
+    private String transmitStatus;
     private UsbSerialBridge usb;
     private BluetoothSerialBridge bluetooth;
     private RadioSelection selection;
@@ -50,7 +52,8 @@ public final class CatService extends Service {
             if (selection == null) return;
             if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
                 UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-                if (device != null && selection.path.startsWith("android-usb:" + device.getDeviceId() + ":")) {
+                if (device != null && (selection.path.startsWith("android-usb:" + device.getDeviceId() + ":")
+                    || (selection.usbTx && device.getDeviceName().equals(selection.usbAudioPath)))) {
                     stoppedReason = "USB device disconnected";
                     requestStop();
                 }
@@ -147,34 +150,72 @@ public final class CatService extends Service {
 
     private void runServer(long runningServer, RadioSelection radio) {
         AtomicBoolean cancelAudio = new AtomicBoolean();
+        AtomicReference<String> outputFailure = new AtomicReference<>();
         Thread capture = null;
+        Thread transmit = null;
+        long output = 0;
         String error;
         try {
+            if (radio.usbTx) {
+                output = UsbAudioMonitor.createOutput();
+                if (output == 0) throw new IllegalStateException("Could not allocate USB transmit output");
+                long activeOutput = output;
+                transmit = new Thread(() -> runUsbOutput(runningServer, radio, activeOutput,
+                    cancelAudio, outputFailure), "rigctld-usb-transmit");
+                transmit.start();
+            }
             if (radio.usbAudioPath != null) {
                 capture = new Thread(() -> runUsbAudio(runningServer, radio, cancelAudio), "rigctld-usb-audio");
                 capture.start();
             }
             error = nativeRun(runningServer, radio.model, radio.path, radio.baud,
-                radio.rtsCts ? "Hardware" : "None", radio.allowPtt, radio.usbAudioPath != null, radio.trusdxAudio);
+                radio.rtsCts ? "Hardware" : "None", radio.allowPtt, radio.usbAudioPath != null,
+                radio.trusdxAudio, output);
         } catch (RuntimeException | LinkageError failure) {
             error = "CAT server failed: " + failure.getMessage();
         } finally {
             cancelAudio.set(true);
-            if (capture != null) {
-                // Native capture uses bounded, interruptible polls. The server handle stays live until it returns.
-                boolean interrupted = false;
-                while (capture.isAlive()) {
-                    try {
-                        capture.join();
-                    } catch (InterruptedException ignored) {
-                        interrupted = true;
-                    }
-                }
-                if (interrupted) Thread.currentThread().interrupt();
+            joinAudio(capture);
+            joinAudio(transmit);
+            if (output != 0) UsbAudioMonitor.destroyOutput(output);
+        }
+        final String result = error == null ? outputFailure.get() : error;
+        main.post(() -> finish(result));
+    }
+
+    private static void joinAudio(Thread thread) {
+        if (thread == null) return;
+        // USB workers use bounded polls. Keep their native handles valid
+        // until they return, including during an interrupted shutdown.
+        boolean interrupted = false;
+        while (thread.isAlive()) {
+            try {
+                thread.join();
+            } catch (InterruptedException ignored) {
+                interrupted = true;
             }
         }
-        final String result = error;
-        main.post(() -> finish(result));
+        if (interrupted) Thread.currentThread().interrupt();
+    }
+
+    private void runUsbOutput(long runningServer, RadioSelection radio, long output,
+                              AtomicBoolean cancelled, AtomicReference<String> failure) {
+        String outcome;
+        try {
+            UsbManager manager = getSystemService(UsbManager.class);
+            UsbDevice device = manager.getDeviceList().get(radio.usbAudioPath);
+            outcome = UsbAudioMonitor.output(manager, device, cancelled, message -> main.post(() -> {
+                if (server != runningServer || stopping) return;
+                transmitStatus = message;
+                if (listening) publishListening();
+            }), output);
+        } catch (RuntimeException | LinkageError error) {
+            outcome = "USB transmit output failed: " + error.getMessage();
+        }
+        if (!cancelled.get()) {
+            failure.set(outcome == null ? "USB transmit output ended" : outcome);
+            nativeStop(runningServer);
+        }
     }
 
     private void runUsbAudio(long runningServer, RadioSelection radio, AtomicBoolean cancelled) {
@@ -264,6 +305,9 @@ public final class CatService extends Service {
             message += "\n" + (audioStatus == null ? "Opening C-Media USB receive audio" : audioStatus);
         }
         if (selection.trusdxAudio) message += "\n" + audioStatus;
+        if (selection.usbTx) {
+            message += "\n" + (transmitStatus == null ? "Opening C-Media USB transmit audio" : transmitStatus);
+        }
         if (selection.receivePlayback) {
             message += "\n" + (playbackStatus == null ? "Opening receive playback" : playbackStatus);
         }
@@ -343,7 +387,7 @@ public final class CatService extends Service {
 
     private static native long nativeCreate();
     private native String nativeRun(long handle, int model, String path, String baud, String handshake,
-                                    boolean allowPtt, boolean usbAudioRx, boolean trusdxAudioRx);
+                                    boolean allowPtt, boolean usbAudioRx, boolean trusdxAudioRx, long output);
     private static native void nativeAudioFailed(long handle);
     private static native long nativeTruSdxSamples();
     private static native void nativeStop(long handle);

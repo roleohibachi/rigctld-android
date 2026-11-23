@@ -17,6 +17,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 extern "C" {
 #include "rigctl_parse.h"
 
@@ -34,6 +38,16 @@ namespace {
 constexpr std::size_t max_clients = 16;
 constexpr std::size_t max_command_bytes = 4096;
 constexpr std::size_t max_reply_bytes = 65536;
+
+void report_usb_ptt_failure(const char* action, int result) {
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_WARN, "RigctldUsbTx", "%s: %d (%s)",
+                        action, result, rigerror(result));
+#else
+    (void)action;
+    (void)result;
+#endif
+}
 
 class Socket {
 public:
@@ -78,10 +92,19 @@ struct RadioControl {
     vfo_t ptt_vfo = RIG_VFO_CURR;
     std::chrono::steady_clock::time_point ptt_deadline{};
 
+    bool pttOff(RIG* rig, vfo_t vfo) const {
+        ptt_t state;
+        const int result = rig_get_ptt(rig, vfo, &state);
+        if (result == RIG_OK && state == RIG_PTT_OFF) return true;
+        report_usb_ptt_failure("Confirm PTT off", result == RIG_OK ? -RIG_EIO : result);
+        return false;
+    }
+
     int release(RIG* rig) {
         if (!ptt_owner) return RIG_OK;
         if (tx) tx->finish(false);
-        const int result = rig_set_ptt(rig, ptt_vfo, RIG_PTT_OFF);
+        int result = rig_set_ptt(rig, ptt_vfo, RIG_PTT_OFF);
+        if (result == RIG_OK && tx && !pttOff(rig, ptt_vfo)) result = -RIG_EIO;
         if (result == RIG_OK) ptt_owner = nullptr;
         return result;
     }
@@ -90,6 +113,7 @@ struct RadioControl {
 struct CommandContext {
     RadioControl& control;
     Client& client;
+    RIG* rig;
 };
 thread_local CommandContext* current_command = nullptr;
 
@@ -103,7 +127,7 @@ bool parse_command(RIG* rig, Client& client, RadioControl& control) {
     std::size_t length = 0;
     FILE* output = open_memstream(&reply, &length);
     if (!output) return false;
-    CommandContext context{control, client};
+    CommandContext context{control, client, rig};
     current_command = &context;
     embedded_stream_set_client(client.socket.get());
     const int result = rigctl_parse(
@@ -169,7 +193,7 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
     const std::string_view name(command);
     if (name == "halt" || name == "pause" || name == "test") return -RIG_EACCESS;
     if (current_command == nullptr) return -RIG_EINTERNAL;
-    auto& [control, client] = *current_command;
+    auto& [control, client, rig] = *current_command;
     if (name.substr(0, 7) == "stream_") {
         return ((control.radio.model == RIG_MODEL_DUMMY && control.radio.path.empty())
             || control.radio.usb_audio_rx || control.tx) ? RIG_OK : -RIG_ENAVAIL;
@@ -204,6 +228,7 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
         return -RIG_EACCESS;
     }
     if (control.tx && !control.tx->canKey(client.socket.get())) return -RIG_EACCESS;
+    if (control.tx && !control.ptt_owner && !control.pttOff(rig, vfo)) return -RIG_EIO;
     if (control.ptt_owner == nullptr) {
         control.ptt_deadline = std::chrono::steady_clock::now()
             + (control.tx ? std::chrono::seconds(35) : std::chrono::minutes(3));
@@ -217,12 +242,17 @@ extern "C" int rigctld_embedded_authorize(const char* command, const char* argum
 
 extern "C" void rigctld_embedded_completed(const char* command, const char* argument, int result) {
     if (std::string_view(command) != "set_ptt" || !argument) return;
-    auto& [control, client] = *current_command;
+    auto& [control, client, rig] = *current_command;
     if (result == RIG_OK && argument[0] == '0') {
-        control.ptt_owner = nullptr;
+        if (!control.tx || !control.ptt_owner || control.pttOff(rig, control.ptt_vfo)) {
+            control.ptt_owner = nullptr;
+        }
     } else if (control.tx) {
         if (result == RIG_OK) control.tx->keyed(client.socket.get());
-        else control.tx->finish(false);
+        else {
+            report_usb_ptt_failure("Set data PTT", result);
+            control.tx->finish(false);
+        }
     }
 }
 
@@ -268,10 +298,13 @@ std::string RigctldServer::run(uint16_t port, const Radio& radio, const std::fun
 
     std::string error;
     std::unique_ptr<TxStream> tx;
-    if (radio.tx_playback) tx = std::make_unique<TxStream>(rig.get(), *radio.tx_playback);
-    if (tx && (radio.usb_audio_rx || radio.dummy_tx_loopback || tx->attach() != RIG_OK)) {
+    if (radio.tx_playback) {
+        tx = std::make_unique<TxStream>(rig.get(), *radio.tx_playback, radio.usb_audio_rx ? audio_ : nullptr);
+    }
+    if (tx && (radio.dummy_tx_loopback || tx->attach() != RIG_OK
+               || rig_set_cache_timeout_ms(rig.get(), HAMLIB_CACHE_PTT, 0) != RIG_OK)) {
         error = "Attach USB transmit audio";
-    } else if (radio.usb_audio_rx && embedded_audio_attach(audio_, rig.get()) != RIG_OK) {
+    } else if (!tx && radio.usb_audio_rx && embedded_audio_attach(audio_, rig.get()) != RIG_OK) {
         error = "Attach USB receive audio";
     } else if (listen(listener.get(), static_cast<int>(max_clients)) != 0) {
         error = system_error("Listen on CAT socket");

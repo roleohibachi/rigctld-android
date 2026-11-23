@@ -138,11 +138,17 @@ all 48,000 silent network frames through the C-Media output and verified
 dummy PTT off. The USB diagnostic now uses the bounded mono-to-stereo PCM
 queue. JS8Android `5ea22c0c` also passed the separate Android fixture test
 that sends a complete modem frame and PTT on one Hamlib connection. The
-client's byte count and hash matched the dummy sink. Wire the real radio
-session to the PCM queue, including cancellation of in-flight USB audio on
-abort, and connect the normal JS8Android TX controls to the single Hamlib
-connection. Verify modulation and unkey with the owner's low-power dummy
-load. The owner specified 0.1 W and an absolute ceiling of 1 W.
+client's byte count and hash matched the dummy sink. The real FX-4CR USB
+session now uses that PCM queue with cancellation of in-flight transfers.
+The normal JS8Android manual TX controls (`22f72f5f`) use the same Hamlib connection
+for USB audio and data PTT. The silent output probe cancelled four
+in-flight transfers on the Pixel 8a. In the separate live bench attempt,
+the owner observed PTT for under a second before the app reported a PTT
+error. CAT confirmed PTT off afterward. The owner specified 0.1 W and an
+absolute ceiling of 1 W. Capture the client and server Hamlib status on
+the next supervised attempt before changing CAT timing. RF drive and a
+complete frame still need verification.
+[Bench procedure](README.md#fx-4cr-usb-transmit-bench-check)
 
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 

@@ -81,11 +81,13 @@ int main(int argc, char** argv) {
     }
     const std::string_view policy = argc == 3 ? argv[2] : "";
     const bool count_frame = policy == "tx-frame-fixture";
-    const bool tx_fixture = policy == "tx-fixture" || count_frame;
+    const bool duplex_fixture = policy == "duplex-fixture";
+    const bool tx_fixture = policy == "tx-fixture" || count_frame || duplex_fixture;
     FakePlayback playback(count_frame);
     if (port == 0 || argc > 3 || (argc == 3 && policy != "receive-only" && policy != "ptt"
                                  && policy != "audio-fixture" && policy != "dummy-tx-loopback" && !tx_fixture)) {
-        std::cerr << "Usage: rigctld-host [port [receive-only|ptt|audio-fixture|dummy-tx-loopback|tx-fixture|tx-frame-fixture]]\n";
+        std::cerr << "Usage: rigctld-host [port [receive-only|ptt|audio-fixture|dummy-tx-loopback"
+                     "|tx-fixture|tx-frame-fixture|duplex-fixture]]\n";
         return 2;
     }
     std::signal(SIGINT, stop);
@@ -93,7 +95,7 @@ int main(int argc, char** argv) {
     RigctldServer::Radio radio;
     radio.enforce_radio_policy = !policy.empty();
     radio.allow_ptt = policy == "ptt" || tx_fixture;
-    radio.usb_audio_rx = policy == "audio-fixture";
+    radio.usb_audio_rx = policy == "audio-fixture" || duplex_fixture;
     radio.dummy_tx_loopback = policy == "dummy-tx-loopback";
     if (tx_fixture) radio.tx_playback = &playback;
     std::atomic<bool> finished{false};
