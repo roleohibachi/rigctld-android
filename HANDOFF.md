@@ -160,6 +160,16 @@ BG2FX Hamlib backend. Patch `0006-fx4-data-ptt-verify.patch` temporarily
 skips generic command verification only for model FX4 and `TX1`. Confirm
 the resolution against stock Hamlib and remove the workaround when fixed.
 
+With that workaround installed, the owner observed the FX-4CR key for
+approximately 0.5 seconds. CAT sampled 0.67 seconds and confirmed PTT off.
+JS8Android logged successful PTT followed by a transmit-audio I/O failure.
+The trace showed many audio writes in about 20 ms before failure. The
+100 ms USB PCM queue can overflow under that burst. JS8Android commit
+`d6106298` avoids blocking its pre-key audio callback on the CAT PTT
+lock, a likely source of the burst. The fix builds and passes unit tests.
+The queue overflow diagnosis and complete physical frame need a supervised
+retest.
+
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
 Use stock [GGMorse](https://play.google.com/store/apps/details?id=com.ggerganov.GGMorse) to test apps that use the default recording input. On the Pixel 8a, connect the FX-4CR over USB, leave Android rigctld in CAT-only mode with PTT disabled, and close other audio capture apps. Tune to readable CW and open GGMorse with microphone permission. While it decodes, use `adb shell dumpsys media.audio_policy` and `adb shell dumpsys audio` to check the active recording route. Count this as verified only if GGMorse decodes CW and the active input is the rig's USB audio device. Record the Android build, app version, and route. Repeat with Bluetooth once its audio profile is known.
