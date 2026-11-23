@@ -170,6 +170,15 @@ lock, a likely source of the burst. The fix builds and passes unit tests.
 The queue overflow diagnosis and complete physical frame need a supervised
 retest.
 
+On the next supervised FX-4CR USB test, using JS8Android `d6106298`
+and the temporary Hamlib workaround, CAT sampled PTT on for 4.52 seconds
+and then off. JS8Android logged nonzero TX PCM during the burst and PTT
+release without the prior audio I/O error. The owner's power-meter reading
+and independent RF modulation verification remain pending. The blocking
+`RigctldAudioTransmitter` lock was introduced in our rigctld integration;
+the checked upstream JS8Android revision `1abc75d9` uses a different TX
+callback path, so this observation does not establish an upstream defect.
+
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
 Use stock [GGMorse](https://play.google.com/store/apps/details?id=com.ggerganov.GGMorse) to test apps that use the default recording input. On the Pixel 8a, connect the FX-4CR over USB, leave Android rigctld in CAT-only mode with PTT disabled, and close other audio capture apps. Tune to readable CW and open GGMorse with microphone permission. While it decodes, use `adb shell dumpsys media.audio_policy` and `adb shell dumpsys audio` to check the active recording route. Count this as verified only if GGMorse decodes CW and the active input is the rig's USB audio device. Record the Android build, app version, and route. Repeat with Bluetooth once its audio profile is known.
