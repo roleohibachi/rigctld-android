@@ -188,6 +188,13 @@ Start the hardware matrix with the FX-4CR over USB using BG2FX model **2053**. L
 
 For wireless ADB, keep the phone’s USB port available for the rig. Before starting USB CAT, disconnect any other app that is using the rig’s CAT port. If **Refresh ports** is empty, `adb shell dumpsys usb` can distinguish an absent USB device from a device that Android sees but the app does not list. USB baud settings take effect after port detection.
 
+Android rigctld appears in Android's USB app chooser for the serial adapters
+in usb-serial-for-android 3.8.0's default probe table and CDC ACM devices.
+This includes the FX-4CR's CH340 CAT interface (`1a86:7523`). Choosing the
+app opens its setup screen. Select the USB serial port and start the session
+there. If another app opens
+automatically, clear its USB defaults in Android settings.
+
 ### ADB command line for debug builds
 
 With the debug APK installed and ADB connected, run these commands on the
