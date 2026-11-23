@@ -100,6 +100,20 @@ only zero samples. **Stop monitor** cancels the check. Report the network
 frame count and any USB packet errors. This verifies the network and USB path
 with simulated PTT. Physical TX and modulation are separate hardware checks.
 
+The C-Media playback queue converts the Hamlib stream's mono PCM16 to
+stereo at the USB boundary. The host queue test checks signed sample
+preservation, channel duplication, silence padding, queue limits and
+discard. The phone silence check uses that same conversion and counts
+completed USB frames.
+
+On the Pixel 8a, the buffered C-Media check delivered all 48,000 silent
+network frames with zero USB errors across 2,544 packets. In a separate
+radio-free test, JS8Android instrumentation sent its Turbo waveform and
+operated dummy PTT on the same Hamlib connection. The client and the
+`tx-frame-fixture` sink agreed on 657,794 bytes, including slot silence and
+the end marker, with FNV-1a `8557833189931c2a`. The test confirmed dummy
+PTT off after the drain.
+
 To test shared receive audio on the FX-4CR, stop the short monitor, choose **USB serial** for CAT, and select **C-Media (`0d8c:013c`)**. Enable **Share selected USB audio (receive only)** and tap **Start**. Grant microphone and USB permissions if prompted. When status shows **C-Media USB receive ready**, a local Hamlib streaming client built from the pinned revision can request one 48 kHz mono PCM16 stream at `127.0.0.1:4532`. Confirm sample level changes with the FX-4CR AUX output and check CAT frequency readback on a second connection. On USB disconnect the client must stop using the stream. Reconnect the rig, refresh the ports and inputs, and restart the service. The client can reopen at the same address. JS8Android needs a rigctld audio adapter to consume this stream.
 
 ### Robot36 Playback Capture

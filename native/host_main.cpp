@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "server.h"
 
-#ifndef __ANDROID__
 #include "tx_stream.h"
 #include <mutex>
-#endif
 #include <charconv>
 #include <array>
 #include <chrono>
@@ -21,17 +19,23 @@ void stop(int) {
     server.stop();
 }
 
-#ifndef __ANDROID__
 class FakePlayback final : public TxPlayback {
 public:
+    explicit FakePlayback(bool count_frame) : count_frame_(count_frame) {}
+
     bool available() const noexcept override { return connected_; }
 
     bool enqueue(const void* pcm, std::size_t bytes) noexcept override {
         std::lock_guard lock(mutex_);
         const auto* samples = static_cast<const unsigned char*>(pcm);
         // The fixture's marker simulates a failure while a route is in use.
-        if (bytes >= 2 && samples[0] == 0xff && samples[1] == 0xff) connected_ = false;
-        if (!connected_ || bytes > 4800 - pending_) return false;
+        if (!count_frame_ && bytes >= 2 && samples[0] == 0xff && samples[1] == 0xff) connected_ = false;
+        if (!connected_ || (!count_frame_ && bytes > 4800 - pending_)) return false;
+        if (count_frame_) {
+            for (std::size_t index = 0; index < bytes; ++index) {
+                hash_ = (hash_ ^ samples[index]) * 1099511628211ULL;
+            }
+        }
         pending_ += bytes;
         return true;
     }
@@ -50,15 +54,22 @@ public:
 
 private:
     void report(const char* operation) {
-        if (pending_) std::cout << operation << ' ' << pending_ << " TX bytes" << std::endl;
+        if (pending_) {
+            std::cout << operation << ' ' << pending_ << " TX bytes";
+            if (count_frame_) std::cout << ", FNV-1a " << std::hex << hash_ << std::dec;
+            std::cout << std::endl;
+        }
         pending_ = 0;
+        hash_ = offset_basis_;
     }
 
+    const bool count_frame_;
+    static constexpr uint64_t offset_basis_ = 14695981039346656037ULL;
+    uint64_t hash_ = offset_basis_;
     std::atomic<bool> connected_{true};
     std::mutex mutex_;
     std::size_t pending_ = 0;
 };
-#endif
 }
 
 int main(int argc, char** argv) {
@@ -69,15 +80,12 @@ int main(int argc, char** argv) {
         if (conversion.ec != std::errc{} || conversion.ptr != end) port = 0;
     }
     const std::string_view policy = argc == 3 ? argv[2] : "";
-#ifndef __ANDROID__
-    FakePlayback playback;
-    const bool tx_fixture = policy == "tx-fixture";
-#else
-    const bool tx_fixture = false;
-#endif
+    const bool count_frame = policy == "tx-frame-fixture";
+    const bool tx_fixture = policy == "tx-fixture" || count_frame;
+    FakePlayback playback(count_frame);
     if (port == 0 || argc > 3 || (argc == 3 && policy != "receive-only" && policy != "ptt"
                                  && policy != "audio-fixture" && policy != "dummy-tx-loopback" && !tx_fixture)) {
-        std::cerr << "Usage: rigctld-host [port [receive-only|ptt|audio-fixture|dummy-tx-loopback]]\n";
+        std::cerr << "Usage: rigctld-host [port [receive-only|ptt|audio-fixture|dummy-tx-loopback|tx-fixture|tx-frame-fixture]]\n";
         return 2;
     }
     std::signal(SIGINT, stop);
@@ -87,9 +95,7 @@ int main(int argc, char** argv) {
     radio.allow_ptt = policy == "ptt" || tx_fixture;
     radio.usb_audio_rx = policy == "audio-fixture";
     radio.dummy_tx_loopback = policy == "dummy-tx-loopback";
-#ifndef __ANDROID__
     if (tx_fixture) radio.tx_playback = &playback;
-#endif
     std::atomic<bool> finished{false};
     std::thread producer;
     if (radio.usb_audio_rx) {

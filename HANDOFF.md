@@ -135,10 +135,14 @@ the TCP unkey request, a disconnected owner, a failed sink, an audio stall,
 and a missing end-of-burst marker. The Android silence check now runs an
 internal Hamlib client and dummy server on the phone. The Pixel 8a delivered
 all 48,000 silent network frames through the C-Media output and verified
-dummy PTT off. The next integration needs a C-Media buffer for modem
-samples and a JS8Android client that sends PTT and the TX stream over the
-same Hamlib connection. Verify the FX-4CR's physical modulation and unkey
-only with the owner's low-power dummy-load setup.
+dummy PTT off. The USB diagnostic now uses the bounded mono-to-stereo PCM
+queue. JS8Android `5ea22c0c` also passed the separate Android fixture test
+that sends a complete modem frame and PTT on one Hamlib connection. The
+client's byte count and hash matched the dummy sink. Wire the real radio
+session to the PCM queue, including cancellation of in-flight USB audio on
+abort, and connect the normal JS8Android TX controls to the single Hamlib
+connection. Verify modulation and unkey with the owner's low-power dummy
+load. The owner specified 0.1 W and an absolute ceiling of 1 W.
 
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 

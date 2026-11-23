@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "cmedia_pcm.h"
 #include "server.h"
 #include "tx_stream.h"
 
@@ -80,36 +81,33 @@ public:
     bool enqueue(const void* pcm, std::size_t bytes) noexcept override {
         const auto* data = static_cast<const unsigned char*>(pcm);
         std::lock_guard lock(mutex);
-        if (!ready || bytes % 2 || bytes / 2 > static_cast<std::size_t>(4800 - queued)
-            || std::any_of(data, data + bytes, [](unsigned char byte) { return byte != 0; })) {
+        if (!ready || std::any_of(data, data + bytes, [](unsigned char byte) { return byte != 0; })) {
             return false;
         }
-        queued += static_cast<int>(bytes / 2);
-        return true;
+        return pcm_queue.push(pcm, bytes);
     }
 
     bool drain(std::chrono::milliseconds timeout) noexcept override {
         std::unique_lock lock(mutex);
         const unsigned draining = generation;
         changed.wait_for(lock, timeout, [&] {
-            return !ready || generation != draining || queued + in_flight == 0;
+            return !ready || generation != draining || pcm_queue.pending() + in_flight == 0;
         });
-        return ready && generation == draining && queued + in_flight == 0;
+        return ready && generation == draining && pcm_queue.pending() + in_flight == 0;
     }
 
     void discard() noexcept override {
         std::lock_guard lock(mutex);
         ++generation;
-        queued = 0;
+        pcm_queue.clear();
         in_flight = 0;
         changed.notify_all();
     }
 
     void submit(Transfer& transfer) {
         std::lock_guard lock(mutex);
-        transfer.tx_frames = std::min(queued, packets_per_transfer * 48);
+        transfer.tx_frames = pcm_queue.render(transfer.bytes.data(), packets_per_transfer * 48);
         transfer.tx_generation = generation;
-        queued -= transfer.tx_frames;
         in_flight += transfer.tx_frames;
     }
 
@@ -137,7 +135,7 @@ private:
     mutable std::mutex mutex;
     std::condition_variable changed;
     bool ready = false;
-    int queued = 0;
+    CMediaPcm pcm_queue;
     int in_flight = 0;
     int delivered = 0;
     unsigned generation = 0;
