@@ -119,11 +119,14 @@ physical verification of the (tr)uSDX remain pending.
 The host `dummy-tx-loopback` test uses the pinned Hamlib network client with
 48 kHz mono PCM16 and PTT blocked. The JS8Android host harness round-tripped
 189,681 unchanged signal samples from a complete Turbo frame and decoded
-`HELLO-WORLD-`. The same branch has an opt-in Android instrumentation test
-that takes PCM from JS8Android's TX callback. Its APK and the standalone
-ARM64 dummy server built. The on-device test remains pending. Qualify the
-physical output route, shared TX/PTT ownership, normal drain and abort on
-failure before enabling TX for a radio. See [the software-only test commands](README.md#verification-status).
+`HELLO-WORLD-`. On 2026-11-23 the opt-in Android instrumentation test passed
+on a Pixel 8a with Android 17 (API 37) using JS8Android `6817fa97` and the
+standalone ARM64 dummy server from `485e182`. It looped a complete Turbo
+frame from JS8Android's TX callback, compared the returned PCM exactly,
+and decoded the `CQ` in 13.252 seconds. The test issued no PTT commands.
+Qualify the physical output route, shared TX/PTT ownership, normal drain
+and abort on failure before enabling TX for a radio.
+[Software-only test commands](README.md#verification-status)
 
 Use Robot36 next to verify an independent receiver with an existing PCM source boundary, then GGMorse for a narrowband CW decoder and a separate check of stock Android input routing.
 
