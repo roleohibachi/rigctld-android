@@ -60,6 +60,11 @@ The project owner’s only Android device is a Pixel 8a. The first reported run 
 | Rig | CAT and audio paths to verify |
 | --- | --- |
 | FX-4CR | USB CAT with USB audio, and Bluetooth CAT with Bluetooth audio. Exercise both Hamlib model selections over each transport: BG2FX FX4/C/CR/L (2053) and Kenwood TS-590S (2031). |
+
+For the owner's FX-4CR running F5BUD firmware, select **Kenwood TS-590S
+(2031)**. Stock Hamlib 4.7.2 successfully keyed and released the radio
+using this profile after disabling AI at initialization. The Android build
+and USB audio path with model 2031 still need physical verification.
 | (tr)uSDX | USB serial carrying both CAT and rig-specific audio on the same link. Verify CAT independently in Phase 1 and the multiplexed RX/TX path in Phase 2. |
 
 Target affordable, older Android hardware. Android 12 (API 31) is the provisional minimum for the full feature set because it provides explicit communication-device routing for Bluetooth audio. This is a design target pending hardware coverage. Other testers will need to verify additional phone models, the Android version floor, and other radios. Record verified combinations by phone, Android version, rig firmware, Hamlib model and transport. See the [compatibility rationale](AUDIT.md#android-version-and-hardware-coverage).

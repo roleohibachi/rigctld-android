@@ -6,6 +6,7 @@
 #include <new>
 #include <android/log.h>
 #include <hamlib/rig.h>
+#include <vector>
 
 namespace {
 int hamlib_log(enum rig_debug_level_e, rig_ptr_t, const char* format, va_list args) {
@@ -47,6 +48,31 @@ std::string string_from_java(JNIEnv* env, jstring value) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_org_rigctld_android_CatService_nativeCreate(JNIEnv*, jclass) {
     return reinterpret_cast<jlong>(new (std::nothrow) RigctldServer);
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_org_rigctld_android_MainActivity_nativeRigModels(JNIEnv* env, jclass) {
+    std::vector<std::string> models;
+    rig_load_all_backends();
+    rig_list_foreach([](const rig_caps* caps, rig_ptr_t context) -> int {
+        auto& entries = *static_cast<std::vector<std::string>*>(context);
+        entries.push_back(std::to_string(caps->rig_model) + " · "
+            + (caps->mfg_name ? caps->mfg_name : "") + " "
+            + (caps->model_name ? caps->model_name : ""));
+        return 1;
+    }, &models);
+    jclass type = env->FindClass("java/lang/String");
+    if (!type) return nullptr;
+    jobjectArray result = env->NewObjectArray(static_cast<jsize>(models.size()), type, nullptr);
+    if (!result) return nullptr;
+    for (size_t i = 0; i < models.size(); ++i) {
+        jstring value = env->NewStringUTF(models[i].c_str());
+        if (!value) return nullptr;
+        env->SetObjectArrayElement(result, static_cast<jsize>(i), value);
+        env->DeleteLocalRef(value);
+        if (env->ExceptionCheck()) return nullptr;
+    }
+    return result;
 }
 
 extern "C" JNIEXPORT jstring JNICALL

@@ -9,6 +9,7 @@ final class RadioSelection {
     static final int BLUETOOTH = 2;
     static final int TRUSDX_MODEL = 2055;
     static final int FX4_MODEL = 2053;
+    static final int TS590S_MODEL = 2031;
 
     final int transport;
     final int model;
@@ -67,7 +68,7 @@ final class RadioSelection {
 
     boolean valid() {
         if (bluetoothAudio && (transport != BLUETOOTH || allowPtt || usbAudioPath != null || trusdxAudio)) return false;
-        if (usbTx && (model != FX4_MODEL || usbAudioPath == null || !allowPtt || receivePlayback || trusdxAudio)) {
+        if (usbTx && ((model != FX4_MODEL && model != TS590S_MODEL) || usbAudioPath == null || !allowPtt || receivePlayback || trusdxAudio)) {
             return false;
         }
         if (usbAudioPath != null && (transport != USB || (allowPtt && !usbTx))) return false;

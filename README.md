@@ -120,7 +120,8 @@ To test shared receive audio on the FX-4CR, stop the short monitor, choose **USB
 
 Use a suitable dummy load, the lowest power setting you intend to verify,
 and someone at the radio watching its power reading. Run **Check USB output
-(silence)** first. Then select **USB serial**, Hamlib model **2053**, and
+(silence)** first. For F5BUD firmware, select **USB serial**, Hamlib model
+**Kenwood TS-590S (2031)**, and
 **C-Media (0d8c:013c)**. Enable USB audio sharing and **Allow USB transmit
 audio (FX-4CR)**, then confirm the session. The app should report both
 **C-Media USB receive ready** and **C-Media USB transmit ready**.
@@ -177,6 +178,11 @@ unsolicited TX notification and continue waiting for ID. The original
 Android master-revision sequence has not been independently reproduced
 with stock Hamlib.
 
+For F5BUD firmware use the Kenwood TS-590S profile, model 2031. Stock
+Hamlib 4.7.2 tested this profile successfully over Bluetooth after it
+disabled AI on initialization. The Android model 2031 USB audio and TX
+combination still needs a supervised physical test.
+
 The pinned Hamlib build includes a temporary FX-4CR workaround that skips
 generic verification of `TX1;` for model 2053. CAT PTT-off readback is
 still checked after release. A supervised dummy-load test observed a
@@ -222,7 +228,7 @@ In **Ham2K Logger Next (HaLo)**, choose **Radio controlled via rigctld** as the 
 2. Tap **Start** and grant USB access if prompted. Use `rigctl -m 2 -r 127.0.0.1:14532 f`, `m` and `t` to query frequency, mode and PTT through the same ADB forward. Then verify a frequency and mode change. Try stop/restart and disconnect/reconnect for each applicable combination in the [hardware matrix](HANDOFF.md#hardware-and-android-coverage).
 3. For an issue, use **Copy diagnostics** and include the shortest reproduction, firmware version and settings. The copy includes the last session’s build, model and transport and omits the selected device path.
 
-Start the hardware matrix with the FX-4CR over USB using BG2FX model **2053**. Leave **Allow CAT PTT** unchecked. Compare the frequency and mode returned by CAT with the rig’s display and include those results and the PTT status when reporting the test.
+For the FX-4CR with F5BUD firmware, start with Kenwood TS-590S model **2031**. Leave **Allow CAT PTT** unchecked. Compare the frequency and mode returned by CAT with the rig’s display and include those results and the PTT status when reporting the test. Search the model selector by name or numeric Hamlib ID, or enter the ID directly.
 
 For wireless ADB, keep the phone’s USB port available for the rig. Before starting USB CAT, disconnect any other app that is using the rig’s CAT port. If **Refresh ports** is empty, `adb shell dumpsys usb` can distinguish an absent USB device from a device that Android sees but the app does not list. USB baud settings take effect after port detection.
 

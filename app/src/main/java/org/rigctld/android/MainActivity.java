@@ -22,6 +22,7 @@ import android.text.TextWatcher;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -63,7 +64,7 @@ public class MainActivity extends Activity {
     private RadioSelection pendingAudioRadio;
     private AtomicBoolean monitorCancelled;
     private String audioMonitorReport = "";
-    private EditText rigModel;
+    private AutoCompleteTextView rigModel;
     private EditText baud;
     private CheckBox rtsCts;
     private CheckBox allowPtt;
@@ -122,7 +123,27 @@ public class MainActivity extends Activity {
         radioSettings = new LinearLayout(this);
         radioSettings.setOrientation(LinearLayout.VERTICAL);
         content.addView(radioSettings);
-        rigModel = numberInput("Hamlib model ID (e.g. 2053)", "2053");
+        TextView modelLabel = new TextView(this);
+        modelLabel.setText("Hamlib radio model");
+        radioSettings.addView(modelLabel);
+        rigModel = new AutoCompleteTextView(this);
+        rigModel.setId(View.generateViewId());
+        rigModel.setSingleLine(true);
+        rigModel.setInputType(InputType.TYPE_CLASS_TEXT);
+        rigModel.setThreshold(1);
+        rigModel.setHint("Search model name or ID");
+        rigModel.setText("2031");
+        modelLabel.setLabelFor(rigModel.getId());
+        radioSettings.addView(rigModel);
+        try {
+            System.loadLibrary("android_rigctld");
+            List<String> models = new ArrayList<>(List.of(nativeRigModels()));
+            models.sort(String.CASE_INSENSITIVE_ORDER);
+            rigModel.setAdapter(new RigModelAdapter(this, models));
+            rigModel.setOnClickListener(view -> rigModel.showDropDown());
+        } catch (RuntimeException | LinkageError error) {
+            rigModel.setError("Model list unavailable; enter a Hamlib model ID");
+        }
         baud = numberInput("Serial baud (blank uses Hamlib default)", "");
         ports = new Spinner(this);
         ports.setContentDescription("Serial port");
@@ -354,7 +375,7 @@ public class MainActivity extends Activity {
 
     private boolean isTruSdxUsb() {
         return transport.getSelectedItemPosition() == RadioSelection.USB
-            && Integer.toString(RadioSelection.TRUSDX_MODEL).equals(rigModel.getText().toString());
+            && selectedModel() == RadioSelection.TRUSDX_MODEL;
     }
 
     private void requestAudioMonitor() {
@@ -531,11 +552,8 @@ public class MainActivity extends Activity {
             selectionMessage.setText("Select a serial port, or refresh ports.");
             return;
         }
-        int model;
-        try {
-            model = Integer.parseInt(rigModel.getText().toString());
-            if (model < 2) throw new NumberFormatException();
-        } catch (NumberFormatException invalidModel) {
+        int model = selectedModel();
+        if (model < 2) {
             rigModel.setError("Enter a Hamlib radio model ID");
             return;
         }
@@ -567,8 +585,8 @@ public class MainActivity extends Activity {
             }
         }
         boolean usbTx = audioPath != null && transmitAudio.isChecked();
-        if (usbTx && model != RadioSelection.FX4_MODEL) {
-            selectionMessage.setText("Use Hamlib model 2053 for FX-4CR USB transmit audio.");
+        if (usbTx && model != RadioSelection.FX4_MODEL && model != RadioSelection.TS590S_MODEL) {
+            selectionMessage.setText("Use Hamlib model 2031 or 2053 for FX-4CR USB transmit audio.");
             return;
         }
         RadioSelection selection = new RadioSelection(choice, model, port.path, rate,
@@ -701,4 +719,17 @@ public class MainActivity extends Activity {
         if (!audioMonitorReport.isEmpty()) diagnostics.append("\nUSB audio monitor:\n").append(audioMonitorReport);
         getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("rigctld diagnostics", diagnostics));
     }
+
+    private int selectedModel() {
+        String value = rigModel.getText().toString().trim();
+        int separator = value.indexOf(' ');
+        if (separator >= 0) value = value.substring(0, separator);
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException error) {
+            return -1;
+        }
+    }
+
+    private static native String[] nativeRigModels();
 }
