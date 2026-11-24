@@ -30,6 +30,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.TabHost;
+import android.widget.TabWidget;
+import android.widget.FrameLayout;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -116,13 +119,46 @@ public class MainActivity extends Activity {
         TextView rig = new TextView(this);
         rig.setText(CatService.ENDPOINT);
         content.addView(rig);
+        TabHost tabs = new TabHost(this);
+        tabs.setId(android.R.id.tabhost);
+        LinearLayout tabLayout = new LinearLayout(this);
+        tabLayout.setOrientation(LinearLayout.VERTICAL);
+        TabWidget tabWidget = new TabWidget(this);
+        tabWidget.setId(android.R.id.tabs);
+        tabLayout.addView(tabWidget);
+        FrameLayout tabContent = new FrameLayout(this);
+        tabContent.setId(android.R.id.tabcontent);
+        tabLayout.addView(tabContent, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        tabs.addView(tabLayout);
+        tabs.setup();
+        content.addView(tabs, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+
+        LinearLayout profilesContent = new LinearLayout(this);
+        profilesContent.setOrientation(LinearLayout.VERTICAL);
+        TextView profilesPlaceholder = new TextView(this);
+        profilesPlaceholder.setText("Profile management is coming later. The current configuration is set in CAT and Audio.");
+        profilesContent.addView(profilesPlaceholder);
+        LinearLayout catContent = new LinearLayout(this);
+        catContent.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout audioContent = new LinearLayout(this);
+        audioContent.setOrientation(LinearLayout.VERTICAL);
+        addTab(tabs, "profiles", "Profiles", profilesContent);
+        addTab(tabs, "cat", "CAT", catContent);
+        addTab(tabs, "audio", "Audio", audioContent);
+        if (savedInstanceState != null) {
+            selectedTab = savedInstanceState.getString("selectedTab", "profiles");
+            tabs.setCurrentTabByTag(selectedTab);
+        }
+        tabs.setOnTabChangedListener(tag -> selectedTab = tag);
         transport = new Spinner(this);
         transport.setContentDescription("CAT transport");
         transport.setAdapter(adapter(List.of("Dummy rig", "USB serial", "Bluetooth serial")));
-        content.addView(transport);
+        catContent.addView(transport);
         radioSettings = new LinearLayout(this);
         radioSettings.setOrientation(LinearLayout.VERTICAL);
-        content.addView(radioSettings);
+        catContent.addView(radioSettings);
         TextView modelLabel = new TextView(this);
         modelLabel.setText("Hamlib radio model");
         radioSettings.addView(modelLabel);
@@ -184,15 +220,13 @@ public class MainActivity extends Activity {
         diagnostics.setText("Copy diagnostics");
         diagnostics.setOnClickListener(view -> copyDiagnostics());
         content.addView(diagnostics);
-        addUsbAudioPicker(content);
+        addUsbAudioPicker(audioContent);
         rigModel.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override public void afterTextChanged(Editable text) { render(); }
         });
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(content);
-        setContentView(scroll);
+        setContentView(content);
         transport.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long itemId) {
                 refreshPorts();
@@ -201,6 +235,23 @@ public class MainActivity extends Activity {
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
         refreshPorts();
+    }
+
+    private String selectedTab = "profiles";
+
+    private void addTab(TabHost tabs, String tag, String label, View content) {
+        tabs.addTab(tabs.newTabSpec(tag).setIndicator(label).setContent(ignored -> {
+            ScrollView scroll = new ScrollView(this);
+            scroll.setFillViewport(true);
+            scroll.addView(content);
+            return scroll;
+        }));
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        state.putString("selectedTab", selectedTab);
+        super.onSaveInstanceState(state);
     }
 
     @Override

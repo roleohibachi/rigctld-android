@@ -2,6 +2,11 @@
 
 Android rigctld provides a local CAT service over USB serial or classic Bluetooth RFCOMM. Use the Hamlib dummy rig to check CAT and the receive streaming protocol without connecting a radio. Shared audio from physical radios is planned for a later phase.
 
+The **CAT** tab contains the transport, radio model and serial settings.
+The **Audio** tab contains audio sharing and diagnostics. Configure both
+before using the shared **Start** button. **Profiles** is a placeholder for
+future profile management.
+
 ## Verification status
 
 The owner installed debug build `0.1-dev` on a Pixel 8a running Android 17 (API 37) and confirmed that the Hamlib dummy rig (model 1) listened on `127.0.0.1:4532`.
