@@ -155,8 +155,7 @@ A phone-side trace at Hamlib `af198ace7697c84f5d8ce084271208e383012792`
 showed the FX-4CR returning `TX1;` after Hamlib sent `TX1;` and its
 `ID;` verification query. The Kenwood backend expected an `ID` response,
 retried the command and returned protocol error -8. CAT read PTT off after
-the aborted test. Confirm the behavior with stock Hamlib on the same USB
-connection before preparing a Hamlib backend fix.
+the aborted test.
 
 After an owner-reported firmware update on 2026-11-23, the same USB
 single-frame test still returned `TX1;` while Hamlib expected its `ID;`
@@ -164,10 +163,24 @@ verification response. Hamlib again returned protocol error -8 and the
 frame aborted. CAT read PTT off afterward. The firmware version was not
 recorded.
 
+The owner subsequently reproduced a related failure using stock Hamlib
+4.7.2 model 2053 over Bluetooth with `AI1;`. Hamlib sent `TX;` and
+`ID;`, received `TX0;` followed by `ID021;`, and returned protocol
+error -8 after retries. With `AI0;`, PTT on and off succeeded. A raw
+Bluetooth `TX1;` test returned `TX1;` with AI enabled and no TX response
+with AI disabled. The owner confirmed key and release on the dummy load.
+The TS-590S profile succeeded after Hamlib disabled AI during initialization
+and restored it on close. The owner reports the TS-590 command reference
+specifies a TX response when AI is in use. The observed response is
+consistent with that rule. A candidate Hamlib fix would consume the
+unsolicited TX notification and continue waiting for ID. The original
+Android master-revision sequence has not been independently reproduced
+with stock Hamlib.
+
 The pinned Hamlib build includes a temporary FX-4CR workaround that skips
 generic verification of `TX1;` for model 2053. CAT PTT-off readback is
-still checked after release. The owner plans to investigate the firmware
-and BG2FX backend; the workaround needs physical TX verification.
+still checked after release. A supervised dummy-load test observed a
+full-length PTT period. Independent RF modulation verification remains open.
 
 ### Robot36 Playback Capture
 

@@ -168,8 +168,21 @@ showed `TX1;` arriving ahead of the `ID;` response used by the Kenwood
 backend to verify data PTT. The backend retried and returned protocol error
 -8. The owner observed a brief key and CAT later read PTT off. The same
 result followed a firmware update, whose version was not recorded. The owner
-plans to discuss the behavior with F5BUD and later fix the firmware or
-BG2FX Hamlib backend. Patch `0006-fx4-data-ptt-verify.patch` temporarily
+subsequently tested Hamlib 4.7.2 model 2053 over Bluetooth at 115200 baud.
+With `AI1;` verified, Hamlib sent `TX;` and `ID;`, received `TX0;`
+followed by `ID021;`, retried TX and returned protocol error -8. With
+`AI0;`, PTT on and off succeeded. Raw Bluetooth `TX1;` returned `TX1;`
+with AI on and no TX response with AI off. A `TX1;` response was also
+observed over USB. The owner confirmed Bluetooth `TX1;` keyed and released
+the rig. The TS-590S model 2031 test succeeded after Hamlib disabled AI at
+initialization and restored it on close; it does not establish behavior
+with AI enabled. The owner reports the TS-590 command reference specifies
+a TX response when AI is in use. This supports an AI notification handling
+issue in Hamlib and does not establish a firmware defect. A candidate
+upstream fix would consume the TX notification and continue waiting for
+the ID response. The exact master revision sequence has not been
+independently reproduced against stock Hamlib. Patch
+`0006-fx4-data-ptt-verify.patch` temporarily
 skips generic command verification only for model FX4 and `TX1`. Confirm
 the resolution against stock Hamlib and remove the workaround when fixed.
 
