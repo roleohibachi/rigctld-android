@@ -20,6 +20,7 @@ import android.text.InputType;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
+import android.view.Gravity;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -240,7 +241,12 @@ public class MainActivity extends Activity {
     private String selectedTab = "profiles";
 
     private void addTab(TabHost tabs, String tag, String label, View content) {
-        tabs.addTab(tabs.newTabSpec(tag).setIndicator(label).setContent(ignored -> {
+        TextView indicator = new TextView(this);
+        indicator.setText(label);
+        indicator.setGravity(Gravity.CENTER);
+        indicator.setMinHeight(Math.round(48 * getResources().getDisplayMetrics().density));
+        indicator.setBackgroundResource(R.drawable.tab_indicator);
+        tabs.addTab(tabs.newTabSpec(tag).setIndicator(indicator).setContent(ignored -> {
             ScrollView scroll = new ScrollView(this);
             scroll.setFillViewport(true);
             scroll.addView(content);
