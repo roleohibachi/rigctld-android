@@ -2,6 +2,41 @@
 
 2026-11-20
 
+## License review for a possible MIT path
+
+The owner prefers MIT for project-owned code and may later pursue an iOS
+version. Android remains the current implementation target. The repository
+currently declares GPL-3.0-or-later and its existing license notices have
+not been changed.
+
+- Commit `783ed05` imported the USB and Bluetooth serial bridges, JNI
+  transport files, and Android Hamlib patches from JS8Android revision
+  `1abc75d9ca23096ead784f827ae0b87a712f861b`. That checkout's root
+  README and LICENSE identify JS8Call as GPLv3. The copied bridge files
+  do not carry independent MIT grants. Obtain a clear grant from the
+  relevant rightsholders or replace those portions before relicensing them.
+- `native/CMakeLists.txt` compiles Hamlib revision
+  `af198ace7697c84f5d8ce084271208e383012792` utility sources into the
+  app. Its `rigctl_parse.c` contains a GPL-2.0-or-later prose header and
+  an LGPL-2.1-or-later SPDX line. `dumpcaps.c` and `dumpstate.c` carry
+  GPL-2.0-or-later prose headers. Clarify the conflicting parser notice
+  with Hamlib and audit the other compiled utility files before treating
+  this combined build as permissively licensed.
+- The Hamlib library is generally LGPL-2.1-or-later, with file-specific
+  exceptions. The current build statically links it. Review its exact
+  source licenses and distribution terms separately from the license for
+  newly written project code.
+- `usb-serial-for-android` 3.8.0 carries an MIT license, included under
+  `app/src/main/assets/licenses/`. That does not settle the separate
+  provenance of the JS8Android bridge that calls it.
+
+An MIT path requires a rights and file-provenance review, including all
+contributors and copied or derived files, followed by explicit permission
+or replacement where needed. Preserving the current Hamlib streaming and
+rigctld protocol behavior requires an implementation and test plan for
+any GPL utility source that is removed. Confirm the desired licensing
+and distribution model before changing LICENSE or SPDX identifiers.
+
 **Recommendation**
 
 Build an Android-only CAT APK around upstream rigctld’s command parser and the JS8Android USB bridge. Start with a single, stoppable JNI daemon and one radio. Bring up USB first, then classic Bluetooth CAT. Keep the initial APK free of modem code and audio permissions. Once CAT is stable, support shared audio over USB and compatible Bluetooth links. Evaluate Oboe/AAudio for USB PCM in both directions. Pin Hamlib streaming separately while testing the audio integration.
